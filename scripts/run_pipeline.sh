@@ -29,7 +29,7 @@ mkdir -p "$OUTPUT_DIR"
 
 # Phase 1: Theme Discovery
 echo "--- Phase 1: Generating Codebooks ---"
-uv run generate_codebooks.py \
+uv run generate-codebooks \
   --input "$INPUT_FILE" \
   --output-dir "$OUTPUT_DIR" \
   --positive-column "$POS_COL" \
@@ -41,7 +41,7 @@ uv run generate_codebooks.py \
 
 # Phase 2: Row-Level Coding
 echo "--- Phase 2: Applying Codebooks ---"
-uv run apply_codebooks.py \
+uv run apply-codebooks \
   --input "$INPUT_FILE" \
   --positive-codebook "$OUTPUT_DIR/positive_codebook.md" \
   --improvement-codebook "$OUTPUT_DIR/improvement_codebook.md" \
@@ -54,7 +54,7 @@ uv run apply_codebooks.py \
 
 # Phase 3: Evaluation
 echo "--- Phase 3: Evaluating Results ---"
-uv run evaluate_results.py \
+uv run evaluate-results \
   --input "$FINAL_CSV" \
   --output "$REPORT_FILE"
 

@@ -1,7 +1,7 @@
 [project]
-name = "data"
+name = "survey-coder"
 version = "0.1.0"
-description = "Add your description here"
+description = "LLM-assisted qualitative coding of student survey feedback"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -14,3 +14,14 @@ dependencies = [
     "scikit-learn>=1.8.0",
     "tqdm>=4.67.3",
 ]
+
+[project.scripts]
+generate-codebooks = "survey_coder.generate_codebooks:main"
+apply-codebooks = "survey_coder.apply_codebooks:main"
+evaluate-results = "survey_coder.evaluate_results:main"
+evaluate-gemini = "survey_coder.evaluate_gemini:main"
+evaluate-ollama = "survey_coder.evaluate_ollama:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

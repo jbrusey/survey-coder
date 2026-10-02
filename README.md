@@ -11,6 +11,14 @@ This project automates the first phase of qualitative analysis for student feedb
 
 ---
 
+## Repository Layout
+
+- `src/survey_coder/` — Python package and command implementations
+- `tests/` — automated tests
+- `codebooks/` — maintained benchmark codebooks
+- `scripts/` — pipeline orchestration scripts
+- `docs/` — supporting documentation
+
 ## Getting Started
 
 ### 1. Prerequisites
@@ -19,8 +27,7 @@ The project uses `uv` for lightning-fast, reproducible dependency management. [I
 ### 2. Setup
 Clone the repository and install dependencies:
 ```bash
-uv init
-uv run --version # This will automatically set up the virtual environment
+uv sync
 ```
 
 ### 3. API Keys
@@ -38,7 +45,7 @@ GOOGLE_API_KEY=your_key_here
 ### Phase 1: Theme Discovery
 Generate draft qualitative codebooks from a sample of your data.
 ```bash
-uv run generate_codebooks.py \
+uv run generate-codebooks \
   --input "feedback.xlsx" \
   --output-dir "outputs" \
   --positive-column "Comment1Positive" \
@@ -56,7 +63,7 @@ Open the generated `.md` files in any text editor. You can:
 ### Phase 2: Row-Level Coding
 Apply your refined codebook to the full dataset.
 ```bash
-uv run apply_codebooks.py \
+uv run apply-codebooks \
   --input "feedback.xlsx" \
   --positive-codebook "outputs/positive_codebook.md" \
   --improvement-codebook "outputs/improvement_codebook.md" \
@@ -68,7 +75,7 @@ uv run apply_codebooks.py \
 ### Phase 3: Evaluation
 Compare the LLM results against manual coding to check for reliability.
 ```bash
-uv run evaluate_results.py \
+uv run evaluate-results \
   --input "final_results.csv" \
   --output "evaluation_report.txt"
 ```
@@ -80,10 +87,10 @@ uv run evaluate_results.py \
 To ensure alignment with the human "Gold Standard" coding during benchmark runs, specialized codebooks must be used. These are designed to map precisely to the dimensions used in the manual validation.
 
 ```bash
-uv run apply_codebooks.py \
+uv run apply-codebooks \
   --input "feedback.xlsx" \
-  --positive-codebook "specialized_positive.md" \
-  --improvement-codebook "specialized_improvement.md" \
+  --positive-codebook "codebooks/specialized_positive.md" \
+  --improvement-codebook "codebooks/specialized_improvement.md" \
   --output "benchmark_results.csv" \
   --model "gemini-flash-latest" \
   --provider "google"
@@ -95,9 +102,15 @@ uv run apply_codebooks.py \
 
 | Script | Purpose | Key Flags |
 | :--- | :--- | :--- |
-| `generate_codebooks.py` | Initial theme discovery | `--sample-size`, `--batch-size`, `--provider` |
-| `apply_codebooks.py` | Full dataset coding | `--positive-codebook`, `--batch-size` |
-| `evaluate_results.py` | Validation & Metrics | `--input`, `--output` |
+| `generate-codebooks` | Initial theme discovery | `--sample-size`, `--batch-size`, `--provider` |
+| `apply-codebooks` | Full dataset coding | `--positive-codebook`, `--batch-size` |
+| `evaluate-results` | Validation & Metrics | `--input`, `--output` |
+
+### Tests
+
+```bash
+uv run python -m unittest discover -s tests
+```
 
 ### Provider Support
 Toggle providers using the `--provider` and `--model` flags:
