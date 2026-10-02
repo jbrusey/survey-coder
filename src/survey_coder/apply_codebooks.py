@@ -12,6 +12,7 @@ from tqdm import tqdm
 import google.generativeai as genai
 from dotenv import load_dotenv
 from .data import load_data
+from .config import load_config, load_prompt
 
 # Load environment variables from home directory then local directory
 load_dotenv(os.path.expanduser("~/.env"))
@@ -28,11 +29,9 @@ logger = logging.getLogger(__name__)
 def parse_args():
     parser = argparse.ArgumentParser(description="Apply draft codebooks to code student feedback.")
     parser.add_argument("--input", required=True, help="Path to original .csv or .xlsx file")
-    parser.add_argument("--positive-codebook", required=True, help="Path to positive_codebook.md")
-    parser.add_argument("--improvement-codebook", required=True, help="Path to improvement_codebook.md")
+    parser.add_argument("--config", help="JSON config containing context and a streams list")
+    parser.add_argument("--prompt-dir", default="prompts", help="Directory containing prompt templates")
     parser.add_argument("--output", required=True, help="Path to save final coded .csv")
-    parser.add_argument("--positive-column", default="Comment1Positive", help="Name of the positive comments column")
-    parser.add_argument("--improvement-column", default="Comment1Improvement", help="Name of the improvement comments column")
     parser.add_argument("--id-column", default=None, help="Name of the ID column (optional)")
     parser.add_argument("--model", default="gpt-4o-mini", help="LLM model name")
     parser.add_argument("--provider", default="openai", choices=["openai", "google"], help="LLM provider")
@@ -110,40 +109,13 @@ def parse_json_response(response_text: str) -> Dict:
     except:
         return {"error": "parse_failure", "raw": response_text}
 
-def build_coding_prompt(stream_name: str, codebook_md: str, batch: List[Dict], comment_col: str, id_col: str) -> (str, str):
-    system_prompt = (
-        f"You are a qualitative research assistant. Your task is to apply a codebook to student {stream_name.lower()} feedback.\n\n"
-        "### INSTRUCTIONS:\n"
-        "1. Read the provided codebook carefully.\n"
-        "2. For each comment, identify ALL applicable codes.\n"
-        "3. Use ONLY the code names exactly as they appear in the codebook headers.\n"
-        "4. If multiple codes apply, list them all.\n"
-        "5. If a comment is too vague to code, use the 'Unclear / vague' code.\n"
-        "6. If no specific codes apply but it is a valid comment, use the 'Other' code.\n"
-        "7. Return the results in JSON format.\n\n"
-        "### CODEBOOK:\n"
-        f"{codebook_md}"
-    )
-    
-    formatted_comments = ""
-    for r in batch:
-        comment_text = str(r.get(comment_col, "")).replace("\n", " ")
-        formatted_comments += f"ID: {r[id_col]}\nComment: {comment_text}\n\n"
+def build_coding_prompt(stream: Dict, context: str, codebook_md: str, batch: List[Dict], id_col: str, prompts: Dict[str, str]) -> (str, str):
+    comments = "".join(f"ID: {r[id_col]}\nComment: {str(r.get(stream['column'], '')).replace(chr(10), ' ')}\n\n" for r in batch)
+    values = {"context": context, "stream_name": stream["name"], "codebook": codebook_md, "count": len(batch), "comments": comments}
+    return prompts["system"].format(**values), prompts["batch"].format(**values)
 
-    user_prompt = (
-        f"Code the following {len(batch)} student comments using the provided codebook.\n\n"
-        f"{formatted_comments}"
-        "Return JSON with this structure:\n"
-        "{\n"
-        "  \"results\": [\n"
-        "    { \"id\": \"...\", \"codes\": [\"Code A\", \"Code B\"] },\n"
-        "    ...\n"
-        "  ]\n"
-        "}\n"
-    )
-    return system_prompt, user_prompt
-
-def process_stream(df: pd.DataFrame, stream_name: str, md_path: str, comment_col: str, id_col: str, args: argparse.Namespace) -> Dict[str, List[str]]:
+def process_stream(df: pd.DataFrame, stream: Dict, id_col: str, args: argparse.Namespace, context: str, prompts: Dict[str, str]) -> Dict[str, List[str]]:
+    stream_name, md_path, comment_col = stream["name"], stream["codebook"], stream["column"]
     valid_codes = extract_codes_from_md(md_path)
     with open(md_path, 'r') as f:
         codebook_md = f.read()
@@ -162,7 +134,7 @@ def process_stream(df: pd.DataFrame, stream_name: str, md_path: str, comment_col
     logger.info(f"Coding {len(rows_to_process)} {stream_name} comments in {len(batches)} batches.")
     
     for batch in tqdm(batches, desc=f"Coding {stream_name}"):
-        sys_p, user_p = build_coding_prompt(stream_name, codebook_md, batch, comment_col, id_col)
+        sys_p, user_p = build_coding_prompt(stream, context, codebook_md, batch, id_col, prompts)
         
         try:
             response_text = call_llm(user_p, sys_p, args.model, args.temperature, args.openai_base_url, args.provider)
@@ -196,27 +168,20 @@ def main():
     
     df[id_col] = df[id_col].astype(str)
     
-    # Process Positive
-    pos_results, pos_codes = process_stream(df, "Positive", args.positive_codebook, args.positive_column, id_col, args)
-    
-    # Process Improvement
-    imp_results, imp_codes = process_stream(df, "Improvement", args.improvement_codebook, args.improvement_column, id_col, args)
-    
+    config = load_config(args.config)
+    prompts = {"system": load_prompt(args.prompt_dir, "code_system.txt"), "batch": load_prompt(args.prompt_dir, "code_batch.txt")}
+    results = []
+    for stream in config["streams"]:
+        stream.setdefault("codebook", f"{stream['name'].lower()}_codebook.md")
+        result, codes = process_stream(df, stream, id_col, args, config["context"], prompts)
+        results.append((stream, result, codes))
+
     logger.info("Collating results...")
-    
-    # Create new columns for Positive codes
-    for code in pos_codes:
-        col_name = f"Pos_{code}"
-        df[col_name] = df[id_col].apply(lambda x: 1 if code in pos_results.get(x, []) else 0)
-    
-    # Create new columns for Improvement codes
-    for code in imp_codes:
-        col_name = f"Imp_{code}"
-        df[col_name] = df[id_col].apply(lambda x: 1 if code in imp_results.get(x, []) else 0)
-    
-    # Summary of coding
-    df['Pos_Codes_Applied'] = df[id_col].apply(lambda x: ", ".join(pos_results.get(x, [])))
-    df['Imp_Codes_Applied'] = df[id_col].apply(lambda x: ", ".join(imp_results.get(x, [])))
+    for stream, result_map, codes in results:
+        prefix = stream.get("prefix", stream["name"])
+        for code in codes:
+            df[f"{prefix}_{code}"] = df[id_col].apply(lambda x, c=code: 1 if c in result_map.get(x, []) else 0)
+        df[f"{prefix}_Codes_Applied"] = df[id_col].apply(lambda x: ", ".join(result_map.get(x, [])))
     
     df.to_csv(args.output, index=False)
     logger.info(f"Final coded dataset saved to {args.output}")

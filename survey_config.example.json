@@ -1,0 +1,19 @@
+{
+  "context": "student module feedback",
+  "streams": [
+    {
+      "name": "Positive",
+      "column": "Comment1Positive",
+      "question": "What was positive about the module?",
+      "codebook": "outputs/positive_codebook.md",
+      "prefix": "Pos"
+    },
+    {
+      "name": "Improvement",
+      "column": "Comment1Improvement",
+      "question": "What could be improved about the module?",
+      "codebook": "outputs/improvement_codebook.md",
+      "prefix": "Imp"
+    }
+  ]
+}

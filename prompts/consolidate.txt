@@ -1,0 +1,26 @@
+Below are candidate themes identified from multiple batches of {stream_name} feedback.
+
+Consolidate these into a final draft codebook.
+
+Rules:
+- Merge duplicate or near-duplicate themes while preserving important distinctions.
+- Remove weak themes with little support.
+- Produce no more than {max_final_codes} codes.
+- Include an "Unclear / vague" code and an "Other" code.
+- Ensure codes are suitable for row-level multi-label coding.
+- Produce clear include/exclude rules and example evidence phrases.
+- Return valid JSON only.
+
+Return JSON with this structure:
+{{
+  "codebook_name": "{stream_name} feedback codebook",
+  "stream": "{stream_name}",
+  "codes": [{{
+    "code": "...", "definition": "...", "include_when": ["..."],
+    "exclude_when": ["..."], "indicators": ["..."],
+    "example_evidence": ["..."], "notes": "..."
+  }}]
+}}
+
+Candidate Themes Data:
+{themes_data}

@@ -6,10 +6,7 @@ OUTPUT_DIR="outputs"
 FINAL_CSV="final_coded_results.csv"
 REPORT_FILE="evaluation_report.txt"
 
-# Column names in your Excel/CSV
-# Adjust these based on your specific dataset
-POS_COL="Comment1Positive"
-IMP_COL="Comment1Improvement"
+CONFIG="survey_config.example.json"
 
 # OpenAI-compatible vLLM server
 VLLM_HOST="${VLLM_HOST:-100.101.42.121}"
@@ -35,8 +32,7 @@ echo "--- Phase 1: Generating Codebooks ---"
 uv run generate-codebooks \
   --input "$INPUT_FILE" \
   --output-dir "$OUTPUT_DIR" \
-  --positive-column "$POS_COL" \
-  --improvement-column "$IMP_COL" \
+  --config "$CONFIG" \
   --model "$MODEL" \
   --provider "$PROVIDER" \
   --openai-base-url "$VLLM_BASE_URL" \
@@ -47,11 +43,8 @@ uv run generate-codebooks \
 echo "--- Phase 2: Applying Codebooks ---"
 uv run apply-codebooks \
   --input "$INPUT_FILE" \
-  --positive-codebook "$OUTPUT_DIR/positive_codebook.md" \
-  --improvement-codebook "$OUTPUT_DIR/improvement_codebook.md" \
+  --config "$CONFIG" \
   --output "$FINAL_CSV" \
-  --positive-column "$POS_COL" \
-  --improvement-column "$IMP_COL" \
   --model "$MODEL" \
   --provider "$PROVIDER" \
   --openai-base-url "$VLLM_BASE_URL" \

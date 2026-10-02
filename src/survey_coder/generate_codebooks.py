@@ -11,6 +11,7 @@ from openai import OpenAI
 import google.generativeai as genai
 from dotenv import load_dotenv
 from .data import load_data
+from .config import load_config, load_prompt
 
 # Load environment variables from home directory then local directory
 load_dotenv(os.path.expanduser("~/.env"))
@@ -28,8 +29,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Generate draft qualitative codebooks from student feedback.")
     parser.add_argument("--input", required=True, help="Path to input .csv or .xlsx file")
     parser.add_argument("--output-dir", required=True, help="Directory to save outputs")
-    parser.add_argument("--positive-column", default="Positive", help="Name of the positive comments column")
-    parser.add_argument("--improvement-column", default="Improvement", help="Name of the improvement comments column")
+    parser.add_argument("--config", help="JSON config containing context and a streams list")
+    parser.add_argument("--prompt-dir", default="prompts", help="Directory containing prompt templates")
     parser.add_argument("--id-column", default=None, help="Name of the ID column (optional)")
     parser.add_argument("--model", default="gpt-4o-mini", help="LLM model name")
     parser.add_argument("--provider", default="openai", choices=["openai", "google"], help="LLM provider")
@@ -44,12 +45,8 @@ def parse_args():
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing output directory")
     return parser.parse_args()
 
-def validate_columns(df: pd.DataFrame, positive_col: str, improvement_col: str):
-    missing = []
-    if positive_col not in df.columns:
-        missing.append(positive_col)
-    if improvement_col not in df.columns:
-        missing.append(improvement_col)
+def validate_columns(df: pd.DataFrame, streams: List[Dict]):
+    missing = [stream["column"] for stream in streams if stream["column"] not in df.columns]
     if missing:
         raise ValueError(f"Required columns missing: {', '.join(missing)}")
 
@@ -174,90 +171,15 @@ def parse_json_response(response_text: str) -> Dict:
         logger.error(f"Failed to parse JSON response: {e}")
         return {"error": "JSON parse failure", "raw": response_text}
 
-def build_batch_prompt(stream_name: str, records: List[Dict], max_themes: int, id_col: str) -> (str, str):
-    question = "What was positive about the lecture/session?" if stream_name == "Positive" else "What could be improved about the lecture/session?"
-    
-    system_prompt = (
-        f"You are assisting with qualitative analysis of student lecture feedback. Your task is to identify recurring themes in {stream_name.lower()} comments. "
-        "You are not coding individual comments yet. You are producing candidate themes for a later human-reviewed codebook."
-    )
-    
-    formatted_comments = ""
-    for r in records:
-        meta = f" [{r.get('lecture', '')}]" if 'lecture' in r else ""
-        formatted_comments += f"ID: {r[id_col]}{meta}\nComment: {r['cleaned_comment']}\n\n"
+def build_batch_prompt(stream: Dict, records: List[Dict], max_themes: int, id_col: str, context: str, prompts: Dict[str, str]) -> (str, str):
+    comments = "".join(f"ID: {r[id_col]}\nComment: {r['cleaned_comment']}\n\n" for r in records)
+    values = {"context": context, "stream_name": stream["name"], "question": stream["question"], "max_themes": max_themes, "comments": comments}
+    return prompts["system"].format(**values), prompts["batch"].format(**values)
 
-    user_prompt = (
-        f"Below is a batch of student comments responding to the question: \"{question}\"\n\n"
-        "Identify recurring themes.\n\n"
-        "Rules:\n"
-        "- Focus on repeated ideas, not one-off remarks.\n"
-        "- Do not invent themes that are not supported by comments.\n"
-        "- Keep code names short and clear.\n"
-        "- Distinguish genuinely different themes.\n"
-        "- Merge near-duplicates.\n"
-        "- Include example comment IDs and short evidence phrases.\n"
-        "- Return valid JSON only.\n\n"
-        f"Limit the result to at most {max_themes} themes.\n\n"
-        "Return JSON with this structure:\n"
-        "{\n"
-        "  \"themes\": [\n"
-        "    {\n"
-        "      \"code_name\": \"...\",\n"
-        "      \"definition\": \"...\",\n"
-        "      \"include_when\": [\"...\"],\n"
-        "      \"exclude_when\": [\"...\"],\n"
-        "      \"indicators\": [\"...\"],\n"
-        "      \"example_comment_ids\": [\"...\"],\n"
-        "      \"example_evidence\": [\"...\"]\n"
-        "    }\n"
-        "  ]\n"
-        "}\n\n"
-        "Comments:\n"
-        f"{formatted_comments}"
-    )
-    return system_prompt, user_prompt
 
-def build_consolidation_prompt(stream_name: str, batch_themes: List[Dict], max_final_codes: int) -> (str, str):
-    system_prompt = (
-        "You are a qualitative research expert. You are consolidating multiple batches of candidate themes into a single, high-quality draft codebook. "
-        "The goal is to create a codebook that a human can use to reliably code student feedback comments."
-    )
-    
-    themes_data = json.dumps(batch_themes, indent=2)
-    
-    user_prompt = (
-        f"Below are candidate themes identified from multiple batches of student {stream_name.lower()} feedback.\n\n"
-        "Consolidate these into a final draft codebook.\n\n"
-        "Consolidation rules:\n"
-        "- Merge duplicate or near-duplicate themes.\n"
-        "- Preserve important distinctions.\n"
-        "- Remove weak themes with little support (only 1-2 examples across all batches).\n"
-        f"- Produce no more than {max_final_codes} codes.\n"
-        "- Include an \"Unclear / vague\" code.\n"
-        "- Include an \"Other\" code.\n"
-        "- Ensure codes are suitable for later row-level multi-label coding.\n"
-        "- Produce clear include/exclude rules.\n"
-        "- Produce example evidence phrases.\n\n"
-        "Return JSON with this structure:\n"
-        "{\n"
-        f"  \"codebook_name\": \"{stream_name} feedback codebook\",\n"
-        f"  \"stream\": \"{stream_name}\",\n"
-        "  \"codes\": [\n"
-        "    {\n"
-        "      \"code\": \"...\",\n"
-        "      \"definition\": \"...\",\n"
-        "      \"include_when\": [\"...\"],\n"
-        "      \"exclude_when\": [\"...\"],\n"
-        "      \"indicators\": [\"...\"],\n"
-        "      \"example_evidence\": [\"...\"],\n"
-        "      \"notes\": \"...\"\n"
-        "    }\n"
-        "  ]\n"
-        "}\n\n"
-        f"Candidate Themes Data:\n{themes_data}"
-    )
-    return system_prompt, user_prompt
+def build_consolidation_prompt(stream: Dict, batch_themes: List[Dict], max_final_codes: int, context: str, prompts: Dict[str, str]) -> (str, str):
+    values = {"context": context, "stream_name": stream["name"], "max_final_codes": max_final_codes, "themes_data": json.dumps(batch_themes, indent=2)}
+    return prompts["system"].format(**values), prompts["batch"].format(**values)
 
 def save_markdown_codebook(path: str, codebook: Dict):
     with open(path, 'w') as f:
@@ -293,7 +215,8 @@ def save_markdown_codebook(path: str, codebook: Dict):
             
             f.write("---\n\n")
 
-def process_stream(stream_name: str, df: pd.DataFrame, args: argparse.Namespace, id_col: str, comment_col: str):
+def process_stream(stream: Dict, df: pd.DataFrame, args: argparse.Namespace, id_col: str, prompts: Dict[str, str], context: str):
+    stream_name, comment_col = stream["name"], stream["column"]
     logger.info(f"--- Processing {stream_name} Stream ---")
     
     batch_out_dir = os.path.join(args.output_dir, "batch_outputs")
@@ -308,7 +231,7 @@ def process_stream(stream_name: str, df: pd.DataFrame, args: argparse.Namespace,
         batch_num = i + 1
         logger.info(f"Processing {stream_name} batch {batch_num}/{len(batches)} ({len(batch)} comments)")
         
-        sys_p, user_p = build_batch_prompt(stream_name, batch, args.max_themes_per_batch, id_col)
+        sys_p, user_p = build_batch_prompt(stream, batch, args.max_themes_per_batch, id_col, context, prompts)
         
         try:
             response_text = call_llm(user_p, sys_p, args.model, args.temperature, args.openai_base_url, args.provider)
@@ -338,7 +261,7 @@ def process_stream(stream_name: str, df: pd.DataFrame, args: argparse.Namespace,
         return None
 
     logger.info(f"Consolidating {len(all_batch_themes)} candidate themes into final {stream_name} codebook")
-    sys_p_con, user_p_con = build_consolidation_prompt(stream_name, all_batch_themes, args.max_final_codes)
+    sys_p_con, user_p_con = build_consolidation_prompt(stream, all_batch_themes, args.max_final_codes, context, {"system": prompts["consolidate_system"], "batch": prompts["consolidate"]})
     
     try:
         con_response_text = call_llm(user_p_con, sys_p_con, args.model, args.temperature, args.openai_base_url, args.provider)
@@ -373,31 +296,28 @@ def main():
 
     try:
         df = load_data(args.input)
-        validate_columns(df, args.positive_column, args.improvement_column)
+        config = load_config(args.config)
+        streams = config["streams"]
+        validate_columns(df, streams)
         df, id_col = ensure_id_column(df, args.id_column)
-        
-        pos_df = extract_stream(df, "Positive", args.positive_column, id_col, args.min_length)
-        imp_df = extract_stream(df, "Improvement", args.improvement_column, id_col, args.min_length)
-        
-        pos_sampled = sample_comments(pos_df, args.sample_size, args.random_seed)
-        imp_sampled = sample_comments(imp_df, args.sample_size, args.random_seed)
-        
-        pos_codebook = process_stream("Positive", pos_sampled, args, id_col, args.positive_column)
-        imp_codebook = process_stream("Improvement", imp_sampled, args, id_col, args.improvement_column)
+        prompts = {name: load_prompt(args.prompt_dir, name) for name in ("discover_system.txt", "discover_batch.txt", "consolidate_system.txt", "consolidate.txt")}
+        prompts = {"system": prompts["discover_system.txt"], "batch": prompts["discover_batch.txt"], **prompts}
+        for stream in streams:
+            stream_df = extract_stream(df, stream["name"], stream["column"], id_col, args.min_length)
+            sampled = sample_comments(stream_df, args.sample_size, args.random_seed)
+            process_stream(stream, sampled, args, id_col, prompts, config["context"])
         
         summary = {
             "timestamp": datetime.now().isoformat(),
             "input_file": args.input,
             "total_rows_loaded": len(df),
-            "usable_positive_comments": len(pos_df),
-            "usable_improvement_comments": len(imp_df),
+            "streams": [{"name": s["name"], "column": s["column"]} for s in streams],
             "sample_size_per_stream": args.sample_size,
             "batch_size": args.batch_size,
             "model": args.model,
             "provider": args.provider,
             "outputs_produced": [
-                f"{args.output_dir}/positive_codebook.md",
-                f"{args.output_dir}/improvement_codebook.md",
+                *[f"{args.output_dir}/{s['name'].lower()}_codebook.md" for s in streams],
                 f"{args.output_dir}/run_summary.json",
                 f"{args.output_dir}/batch_outputs/ (raw discovery JSON)"
             ]

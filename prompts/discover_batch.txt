@@ -1,0 +1,24 @@
+Below is a batch of comments responding to: "{question}"
+
+Identify recurring themes.
+
+Rules:
+- Focus on repeated ideas, not one-off remarks.
+- Do not invent themes that are not supported by comments.
+- Keep code names short and clear.
+- Distinguish genuinely different themes and merge near-duplicates.
+- Include example comment IDs and short evidence phrases.
+- Return valid JSON only.
+- Limit the result to at most {max_themes} themes.
+
+Return JSON with this structure:
+{{
+  "themes": [{{
+    "code_name": "...", "definition": "...", "include_when": ["..."],
+    "exclude_when": ["..."], "indicators": ["..."],
+    "example_comment_ids": ["..."], "example_evidence": ["..."]
+  }}]
+}}
+
+Comments:
+{comments}

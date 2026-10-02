@@ -6,7 +6,8 @@ This project automates the first phase of qualitative analysis for student feedb
 
 - **Multi-Model Support:** Works with OpenAI (GPT-4), Google Gemini (1.5/2.0), and local models via Ollama.
 - **Single Source of Truth:** Codebooks are stored as human-readable Markdown (`.md`) files. You can edit definitions and rules in plain text, and the pipeline immediately respects your changes.
-- **Two-Stream Analysis:** Processes Positive and Improvement feedback separately to maintain thematic clarity.
+- **Configurable streams:** Analyse any number of questions/columns, each with its own question, codebook, and output prefix.
+- **Configurable prompts:** Edit the plain-text templates in `prompts/` (or pass another directory with `--prompt-dir`) without changing Python code.
 - **Evaluation Suite:** Includes built-in Cohen's Kappa and confusion matrix generation to validate AI results against human "Gold Standard" coding.
 
 ---
@@ -65,11 +66,14 @@ Generate draft qualitative codebooks from a sample of your data.
 uv run generate-codebooks \
   --input "feedback.xlsx" \
   --output-dir "outputs" \
-  --positive-column "Comment1Positive" \
-  --improvement-column "Comment1Improvement" \
+  --config survey_config.example.json \
   --model "gpt-4o-mini"
 ```
-**Output:** `positive_codebook.md` and `improvement_codebook.md`.
+The config contains a `streams` list. Add as many entries as needed:
+```json
+{"name": "Teaching", "column": "TeachingComment", "question": "What did you think of the teaching?", "prefix": "Teaching"}
+```
+**Output:** one codebook per configured stream.
 
 ### Phase 1.5: Human Refinement (Optional)
 Open the generated `.md` files in any text editor. You can:
@@ -82,8 +86,7 @@ Apply your refined codebook to the full dataset.
 ```bash
 uv run apply-codebooks \
   --input "feedback.xlsx" \
-  --positive-codebook "outputs/positive_codebook.md" \
-  --improvement-codebook "outputs/improvement_codebook.md" \
+  --config survey_config.example.json \
   --output "final_results.csv" \
   --model "gpt-4o-mini"
 ```
@@ -103,14 +106,10 @@ uv run evaluate-results \
 ## Benchmark Evaluation
 To ensure alignment with the human "Gold Standard" coding during benchmark runs, specialized codebooks must be used. These are designed to map precisely to the dimensions used in the manual validation.
 
+Put the specialised codebook paths in a config file, then run:
 ```bash
-uv run apply-codebooks \
-  --input "feedback.xlsx" \
-  --positive-codebook "codebooks/specialized_positive.md" \
-  --improvement-codebook "codebooks/specialized_improvement.md" \
-  --output "benchmark_results.csv" \
-  --model "gemini-flash-latest" \
-  --provider "google"
+uv run apply-codebooks --input "feedback.xlsx" --config benchmark_config.json \
+  --output "benchmark_results.csv" --model "gemini-flash-latest" --provider "google"
 ```
 
 ---
@@ -119,8 +118,8 @@ uv run apply-codebooks \
 
 | Script               | Purpose                 | Key Flags                                     |
 |:---------------------|:------------------------|:----------------------------------------------|
-| `generate-codebooks` | Initial theme discovery | `--sample-size`, `--batch-size`, `--provider` |
-| `apply-codebooks`    | Full dataset coding     | `--positive-codebook`, `--batch-size`         |
+| `generate-codebooks` | Initial theme discovery | `--config`, `--sample-size`, `--batch-size` |
+| `apply-codebooks`    | Full dataset coding     | `--config`, `--batch-size`                 |
 | `evaluate-results`   | Validation & Metrics    | `--input`, `--output`                         |
 
 ### Tests

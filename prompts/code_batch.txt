@@ -1,0 +1,5 @@
+Code the following {count} comments using the provided codebook.
+
+{comments}
+Return JSON with this structure:
+{{"results": [{{"id": "...", "codes": ["Code A", "Code B"]}}]}}

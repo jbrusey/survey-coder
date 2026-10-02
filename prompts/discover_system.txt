@@ -1,0 +1,1 @@
+You are assisting with qualitative analysis of {context}. Identify recurring themes in {stream_name} comments. You are producing candidate themes for a later human-reviewed codebook, not coding individual comments.
