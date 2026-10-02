@@ -11,9 +11,12 @@ REPORT_FILE="evaluation_report.txt"
 POS_COL="Comment1Positive"
 IMP_COL="Comment1Improvement"
 
-# Model selection
-PROVIDER="google" # choices: openai, google
-MODEL="gemini-1.5-flash"
+# OpenAI-compatible vLLM server
+VLLM_HOST="${VLLM_HOST:-100.101.42.121}"
+VLLM_BASE_URL="${VLLM_BASE_URL:-http://${VLLM_HOST}:8000/v1}"
+: "${VLLM_API_KEY:?Set VLLM_API_KEY before running this script}"
+PROVIDER="openai"
+MODEL="Qwen/Qwen3.5-9B"
 
 # Batch settings
 GEN_BATCH_SIZE=100
@@ -36,6 +39,7 @@ uv run generate-codebooks \
   --improvement-column "$IMP_COL" \
   --model "$MODEL" \
   --provider "$PROVIDER" \
+  --openai-base-url "$VLLM_BASE_URL" \
   --batch-size "$GEN_BATCH_SIZE" \
   --overwrite
 
@@ -50,6 +54,7 @@ uv run apply-codebooks \
   --improvement-column "$IMP_COL" \
   --model "$MODEL" \
   --provider "$PROVIDER" \
+  --openai-base-url "$VLLM_BASE_URL" \
   --batch-size "$APPLY_BATCH_SIZE"
 
 # Phase 3: Evaluation

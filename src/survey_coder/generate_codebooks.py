@@ -133,10 +133,15 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float, ba
         )
         return response.text
     else:
-        api_key = os.environ.get("OPENAI_API_KEY", "dummy-key-for-local-llm")
-        client = OpenAI(api_key=api_key, base_url=base_url)
+        api_key = os.environ.get("VLLM_API_KEY") if base_url else os.environ.get("OPENAI_API_KEY")
+        client = OpenAI(
+            api_key=api_key or "dummy-key-for-local-llm",
+            base_url=base_url,
+            timeout=120 if base_url else 600,
+            max_retries=0 if base_url else 2,
+        )
         
-        max_retries = 3
+        max_retries = 1 if base_url else 3
         for attempt in range(max_retries):
             try:
                 kwargs = {
@@ -146,7 +151,10 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float, ba
                         {"role": "user", "content": prompt}
                     ],
                     "temperature": temperature,
+                    "max_tokens": 2048,
                 }
+                if base_url and model.startswith("Qwen/"):
+                    kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
                 if not base_url or "ollama" in base_url.lower():
                     kwargs["response_format"] = {"type": "json_object"}
                 

@@ -35,8 +35,25 @@ Create a `.env` file in your **home directory** (`~/.env`) or the **project root
 ```text
 OPENAI_API_KEY=your_key_here
 GOOGLE_API_KEY=your_key_here
+VLLM_API_KEY=your_vllm_key_here
 ```
 *Note: If using Ollama, no key is required.*
+
+### vLLM Server
+
+The pipeline script defaults to the group's OpenAI-compatible vLLM endpoint:
+
+```bash
+export VLLM_HOST="100.101.42.121"
+export VLLM_BASE_URL="http://${VLLM_HOST}:8000/v1"
+export VLLM_API_KEY="your-key-here"
+
+curl "$VLLM_BASE_URL/models" \
+  -H "Authorization: Bearer $VLLM_API_KEY"
+bash scripts/run_pipeline.sh
+```
+
+The configured model is `Qwen/Qwen3.5-9B`. Never commit the API key.
 
 ---
 
@@ -100,11 +117,11 @@ uv run apply-codebooks \
 
 ## Command Reference
 
-| Script | Purpose | Key Flags |
-| :--- | :--- | :--- |
+| Script               | Purpose                 | Key Flags                                     |
+|:---------------------|:------------------------|:----------------------------------------------|
 | `generate-codebooks` | Initial theme discovery | `--sample-size`, `--batch-size`, `--provider` |
-| `apply-codebooks` | Full dataset coding | `--positive-codebook`, `--batch-size` |
-| `evaluate-results` | Validation & Metrics | `--input`, `--output` |
+| `apply-codebooks`    | Full dataset coding     | `--positive-codebook`, `--batch-size`         |
+| `evaluate-results`   | Validation & Metrics    | `--input`, `--output`                         |
 
 ### Tests
 
@@ -117,6 +134,7 @@ Toggle providers using the `--provider` and `--model` flags:
 - **OpenAI:** `--provider openai --model gpt-4o`
 - **Gemini:** `--provider google --model gemini-2.0-flash`
 - **Ollama:** `--provider openai --model gemma4:latest --openai-base-url http://localhost:11434/v1`
+- **vLLM:** `--provider openai --model Qwen/Qwen3.5-9B --openai-base-url "$VLLM_BASE_URL"`
 
 ---
 
