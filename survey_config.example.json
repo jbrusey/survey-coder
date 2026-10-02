@@ -1,5 +1,9 @@
 {
   "context": "student module feedback",
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o-mini"
+  },
   "streams": [
     {
       "name": "Positive",

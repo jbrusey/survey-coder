@@ -32,8 +32,8 @@ def parse_args():
     parser.add_argument("--config", help="JSON config containing context and a streams list")
     parser.add_argument("--prompt-dir", default="prompts", help="Directory containing prompt templates")
     parser.add_argument("--id-column", default=None, help="Name of the ID column (optional)")
-    parser.add_argument("--model", default="gpt-4o-mini", help="LLM model name")
-    parser.add_argument("--provider", default="openai", choices=["openai", "google"], help="LLM provider")
+    parser.add_argument("--model", default=None, help="LLM model name")
+    parser.add_argument("--provider", default=None, choices=["openai", "google", "vllm"], help="LLM provider")
     parser.add_argument("--openai-base-url", default=None, help="Base URL for OpenAI-compatible API (e.g., http://localhost:11434/v1 for Ollama)")
     parser.add_argument("--batch-size", type=int, default=100, help="Number of comments per batch")
     parser.add_argument("--sample-size", type=int, default=1000, help="Max comments to sample per stream")
@@ -277,6 +277,15 @@ def process_stream(stream: Dict, df: pd.DataFrame, args: argparse.Namespace, id_
 
 def main():
     args = parse_args()
+
+    config = load_config(args.config)
+    llm = config.get("llm", {})
+    args.provider = args.provider or llm.get("provider", "openai")
+    args.model = args.model or llm.get("model", "gpt-4o-mini")
+    args.openai_base_url = args.openai_base_url or llm.get("base_url")
+    if args.provider == "vllm" and not args.openai_base_url:
+        logger.error("vLLM requires a base URL (set llm.base_url in config or pass --openai-base-url).")
+        sys.exit(1)
     
     if os.path.exists(args.output_dir) and not args.overwrite:
         logger.error(f"Output directory {args.output_dir} already exists. Use --overwrite to replace.")
@@ -296,7 +305,6 @@ def main():
 
     try:
         df = load_data(args.input)
-        config = load_config(args.config)
         streams = config["streams"]
         validate_columns(df, streams)
         df, id_col = ensure_id_column(df, args.id_column)

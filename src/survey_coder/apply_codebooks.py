@@ -33,8 +33,8 @@ def parse_args():
     parser.add_argument("--prompt-dir", default="prompts", help="Directory containing prompt templates")
     parser.add_argument("--output", required=True, help="Path to save final coded .csv")
     parser.add_argument("--id-column", default=None, help="Name of the ID column (optional)")
-    parser.add_argument("--model", default="gpt-4o-mini", help="LLM model name")
-    parser.add_argument("--provider", default="openai", choices=["openai", "google"], help="LLM provider")
+    parser.add_argument("--model", default=None, help="LLM model name")
+    parser.add_argument("--provider", default=None, choices=["openai", "google", "vllm"], help="LLM provider")
     parser.add_argument("--openai-base-url", default=None, help="Base URL for OpenAI-compatible API")
     parser.add_argument("--batch-size", type=int, default=5, help="Number of comments per coding batch")
     parser.add_argument("--temperature", type=float, default=0.0, help="LLM temperature (0.0 for deterministic coding)")
@@ -157,6 +157,14 @@ def process_stream(df: pd.DataFrame, stream: Dict, id_col: str, args: argparse.N
 
 def main():
     args = parse_args()
+
+    config = load_config(args.config)
+    llm = config.get("llm", {})
+    args.provider = args.provider or llm.get("provider", "openai")
+    args.model = args.model or llm.get("model", "gpt-4o-mini")
+    args.openai_base_url = args.openai_base_url or llm.get("base_url")
+    if args.provider == "vllm" and not args.openai_base_url:
+        raise ValueError("vLLM requires a base URL (set llm.base_url in config or pass --openai-base-url).")
     
     df = load_data(args.input)
     
@@ -168,7 +176,6 @@ def main():
     
     df[id_col] = df[id_col].astype(str)
     
-    config = load_config(args.config)
     prompts = {"system": load_prompt(args.prompt_dir, "code_system.txt"), "batch": load_prompt(args.prompt_dir, "code_batch.txt")}
     results = []
     for stream in config["streams"]:

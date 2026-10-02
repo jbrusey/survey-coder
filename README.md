@@ -39,7 +39,7 @@ A portable Tkinter GUI is included for Windows, macOS, and Linux. It selects CSV
 uv run survey-coder-gui
 ```
 
-Use **Run both** for a complete run, or save the generated JSON configuration for later CLI use.
+Choose **OpenAI**, **Google**, or **vLLM** on the model step. For vLLM, enter an OpenAI-compatible `/v1` endpoint, or set `VLLM_BASE_URL` before launching the GUI. Set `VLLM_API_KEY` in the environment for an authenticated endpoint. Save/load configuration stores the provider, model, endpoint, context, and stream mappings; credentials are never saved.
 
 ### 3. API Keys
 Create a `.env` file in your **home directory** (`~/.env`) or the **project root** (`./.env`) with your keys:
@@ -79,10 +79,21 @@ uv run generate-codebooks \
   --config survey_config.example.json \
   --model "gpt-4o-mini"
 ```
-The config contains a `streams` list. Add as many entries as needed:
+The config contains a `streams` list and can optionally hold reusable LLM defaults in `llm`. Add as many stream entries as needed:
 ```json
-{"name": "Teaching", "column": "TeachingComment", "question": "What did you think of the teaching?", "prefix": "Teaching"}
+{
+  "context": "student module feedback",
+  "llm": {
+    "provider": "vllm",
+    "model": "Qwen/Qwen3.5-9B",
+    "base_url": "https://your-vllm-host.example/v1"
+  },
+  "streams": [
+    {"name": "Teaching", "column": "TeachingComment", "question": "What did you think of the teaching?", "prefix": "Teaching"}
+  ]
+}
 ```
+Supported provider values are `openai`, `google`, and `vllm`. CLI flags such as `--provider`, `--model`, and `--openai-base-url` override the corresponding config defaults. vLLM uses the OpenAI-compatible endpoint and `VLLM_API_KEY` environment variable when authentication is enabled.
 **Output:** one codebook per configured stream.
 
 ### Phase 1.5: Human Refinement (Optional)
@@ -143,7 +154,7 @@ Toggle providers using the `--provider` and `--model` flags:
 - **OpenAI:** `--provider openai --model gpt-4o`
 - **Gemini:** `--provider google --model gemini-2.0-flash`
 - **Ollama:** `--provider openai --model gemma4:latest --openai-base-url http://localhost:11434/v1`
-- **vLLM:** `--provider openai --model Qwen/Qwen3.5-9B --openai-base-url "$VLLM_BASE_URL"`
+- **vLLM:** `--provider vllm --model Qwen/Qwen3.5-9B --openai-base-url "$VLLM_BASE_URL"`
 
 ---
 

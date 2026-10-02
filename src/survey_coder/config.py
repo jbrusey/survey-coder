@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 DEFAULT_STREAMS = [
     {"name": "Positive", "column": "Comment1Positive", "question": "What was positive about the lecture/session?", "prefix": "Pos"},
@@ -10,7 +10,7 @@ DEFAULT_STREAMS = [
 
 def load_config(path: str | None) -> Dict[str, Any]:
     if not path:
-        return {"context": "student lecture feedback", "streams": DEFAULT_STREAMS}
+        return {"context": "student lecture feedback", "streams": DEFAULT_STREAMS, "llm": {}}
     with Path(path).open() as f:
         config = json.load(f)
     if not config.get("streams"):
@@ -21,6 +21,11 @@ def load_config(path: str | None) -> Dict[str, Any]:
                 raise ValueError(f"Each stream requires '{key}'")
         stream.setdefault("prefix", stream["name"])
     config.setdefault("context", "qualitative survey feedback")
+    llm = config.setdefault("llm", {})
+    if not isinstance(llm, dict):
+        raise ValueError("Config 'llm' must be an object")
+    if llm.get("provider") not in (None, "openai", "google", "vllm"):
+        raise ValueError("Config llm.provider must be 'openai', 'google', or 'vllm'")
     return config
 
 
