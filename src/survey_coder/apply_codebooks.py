@@ -6,12 +6,12 @@ import logging
 import argparse
 import re
 import pandas as pd
-from datetime import datetime
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
 from tqdm import tqdm
 import google.generativeai as genai
 from dotenv import load_dotenv
+from .data import load_data
 
 # Load environment variables from home directory then local directory
 load_dotenv(os.path.expanduser("~/.env"))
@@ -41,14 +41,6 @@ def parse_args():
     parser.add_argument("--temperature", type=float, default=0.0, help="LLM temperature (0.0 for deterministic coding)")
     parser.add_argument("--max-rows", type=int, default=None, help="Limit number of rows to process (for testing)")
     return parser.parse_args()
-
-def load_data(path: str) -> pd.DataFrame:
-    if path.endswith('.csv'):
-        return pd.read_csv(path)
-    elif path.endswith(('.xlsx', '.xls')):
-        return pd.read_excel(path)
-    else:
-        raise ValueError("Unsupported file format.")
 
 def extract_codes_from_md(md_path: str) -> List[str]:
     """Extracts code names from ## headers in the Markdown file."""
@@ -118,7 +110,7 @@ def parse_json_response(response_text: str) -> Dict:
     except:
         return {"error": "parse_failure", "raw": response_text}
 
-def build_coding_prompt(stream_name: str, codebook_md: str, valid_codes: List[str], batch: List[Dict], comment_col: str, id_col: str) -> (str, str):
+def build_coding_prompt(stream_name: str, codebook_md: str, batch: List[Dict], comment_col: str, id_col: str) -> (str, str):
     system_prompt = (
         f"You are a qualitative research assistant. Your task is to apply a codebook to student {stream_name.lower()} feedback.\n\n"
         "### INSTRUCTIONS:\n"
@@ -170,7 +162,7 @@ def process_stream(df: pd.DataFrame, stream_name: str, md_path: str, comment_col
     logger.info(f"Coding {len(rows_to_process)} {stream_name} comments in {len(batches)} batches.")
     
     for batch in tqdm(batches, desc=f"Coding {stream_name}"):
-        sys_p, user_p = build_coding_prompt(stream_name, codebook_md, valid_codes, batch, comment_col, id_col)
+        sys_p, user_p = build_coding_prompt(stream_name, codebook_md, batch, comment_col, id_col)
         
         try:
             response_text = call_llm(user_p, sys_p, args.model, args.temperature, args.openai_base_url, args.provider)

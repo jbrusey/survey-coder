@@ -2,7 +2,6 @@ import os
 import sys
 import json
 import time
-import random
 import logging
 import argparse
 import pandas as pd
@@ -11,6 +10,7 @@ from typing import List, Dict, Any, Optional
 from openai import OpenAI
 import google.generativeai as genai
 from dotenv import load_dotenv
+from .data import load_data
 
 # Load environment variables from home directory then local directory
 load_dotenv(os.path.expanduser("~/.env"))
@@ -43,15 +43,6 @@ def parse_args():
     parser.add_argument("--temperature", type=float, default=0.2, help="LLM temperature")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing output directory")
     return parser.parse_args()
-
-def load_feedback(path: str) -> pd.DataFrame:
-    logger.info(f"Loading data from {path}")
-    if path.endswith('.csv'):
-        return pd.read_csv(path)
-    elif path.endswith(('.xlsx', '.xls')):
-        return pd.read_excel(path)
-    else:
-        raise ValueError("Unsupported file format. Use .csv or .xlsx")
 
 def validate_columns(df: pd.DataFrame, positive_col: str, improvement_col: str):
     missing = []
@@ -183,7 +174,7 @@ def parse_json_response(response_text: str) -> Dict:
         logger.error(f"Failed to parse JSON response: {e}")
         return {"error": "JSON parse failure", "raw": response_text}
 
-def build_batch_prompt(stream_name: str, records: List[Dict], max_themes: int, comment_col: str, id_col: str) -> (str, str):
+def build_batch_prompt(stream_name: str, records: List[Dict], max_themes: int, id_col: str) -> (str, str):
     question = "What was positive about the lecture/session?" if stream_name == "Positive" else "What could be improved about the lecture/session?"
     
     system_prompt = (
@@ -317,7 +308,7 @@ def process_stream(stream_name: str, df: pd.DataFrame, args: argparse.Namespace,
         batch_num = i + 1
         logger.info(f"Processing {stream_name} batch {batch_num}/{len(batches)} ({len(batch)} comments)")
         
-        sys_p, user_p = build_batch_prompt(stream_name, batch, args.max_themes_per_batch, comment_col, id_col)
+        sys_p, user_p = build_batch_prompt(stream_name, batch, args.max_themes_per_batch, id_col)
         
         try:
             response_text = call_llm(user_p, sys_p, args.model, args.temperature, args.openai_base_url, args.provider)
@@ -381,7 +372,7 @@ def main():
             sys.exit(1)
 
     try:
-        df = load_feedback(args.input)
+        df = load_data(args.input)
         validate_columns(df, args.positive_column, args.improvement_column)
         df, id_col = ensure_id_column(df, args.id_column)
         
