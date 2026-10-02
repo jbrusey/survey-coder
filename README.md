@@ -31,6 +31,16 @@ Clone the repository and install dependencies:
 uv sync
 ```
 
+### Graphical interface
+
+A portable Tkinter GUI is included for Windows, macOS, and Linux. It selects CSV/Excel input files and worksheets, lets you choose columns and runtime settings, and runs discovery/coding in-process (without shelling out to the CLI):
+
+```bash
+uv run survey-coder-gui
+```
+
+Use **Run both** for a complete run, or save the generated JSON configuration for later CLI use.
+
 ### 3. API Keys
 Create a `.env` file in your **home directory** (`~/.env`) or the **project root** (`./.env`) with your keys:
 ```text
