@@ -441,14 +441,18 @@ class SurveyCoderApp:
         actions.grid(row=3, column=0, sticky="ew", pady=(12, 0))
         ttk.Button(actions, text="Load configuration…", command=self.load_config).pack(side="left")
         ttk.Button(actions, text="Save configuration…", command=self.save_config).pack(side="left", padx=(8, 0))
-        self.open_output_button = ttk.Button(actions, text="Open output folder", command=self.open_output_dir)
-        self.open_output_button.pack(side="left", padx=(8, 0))
-        self.action_button = ttk.Button(actions, text="Generate codebooks", command=self.run_action)
-        self.action_button.pack(side="right")
-        self.review_button = ttk.Button(actions, text="Apply reviewed codebooks",
-                                        command=self.apply_reviewed)
-        self.review_button.pack(side="right", padx=(0, 8))
-        self.review_button.state(["disabled"])
+        workflow = ttk.Frame(actions)
+        workflow.pack(side="right")
+        self.action_button = ttk.Button(workflow, text="Generate codebooks",
+                                        command=self.run_action)
+        self.action_button.pack(side="left")
+        self.review_button = ttk.Button(workflow, text="Open output folder",
+                                        command=self.review_codebooks)
+        self.review_button.pack(side="left", padx=(8, 0))
+        self.apply_button = ttk.Button(workflow, text="Apply reviewed codebooks",
+                                       command=self.apply_reviewed)
+        self.apply_button.pack(side="left", padx=(8, 0))
+        self._update_workflow_actions()
 
     def _setting_entry(self, parent: ttk.Frame, label: str, variable: tk.StringVar,
                        row: int, col: int, note: str) -> None:
@@ -502,6 +506,9 @@ class SurveyCoderApp:
 
     def back(self) -> None:
         if self.page_index > 0 and not self.busy:
+            if self.page_index == 2:
+                self.stage = "generate"
+                self._update_workflow_actions()
             self._show_page(self.page_index - 1)
 
     def browse_input(self) -> None:
@@ -627,15 +634,38 @@ class SurveyCoderApp:
                      "Output token limit: " + (str(settings["max_output_tokens"])
                                                  if settings["max_output_tokens"] else "provider/server default"),
                      f"Output: {settings['output_dir']}",
-                     "First step: generate codebooks, review the Markdown files, then apply them."]
+                     "Generate codebooks if needed, review the Markdown files, then apply them."]
             self.summary_text.configure(text="\n".join(lines))
-            self.action_button.state(["!disabled"])
+            self._update_workflow_actions()
         except Exception as exc:
             self.summary_text.configure(text=str(exc))
-            self.action_button.state(["disabled"])
+            self._update_workflow_actions(valid=False)
+
+    def _update_workflow_actions(self, valid: bool = True) -> None:
+        disabled = self.busy or not valid
+        self.action_button.configure(
+            text="Generate codebooks" if self.stage == "generate" else "Generate again")
+        self.apply_button.configure(
+            text="Apply again" if self.stage == "complete" else "Apply reviewed codebooks")
+        self.action_button.state(["disabled"] if disabled else ["!disabled"])
+        self.review_button.state(["disabled"] if disabled else ["!disabled"])
+        self.apply_button.state(
+            ["!disabled"] if not disabled and self.stage in ("apply", "complete")
+            else ["disabled"])
 
     def run_action(self) -> None:
         self._run("generate")
+
+    def review_codebooks(self) -> None:
+        try:
+            self.open_output_dir()
+        except OSError as exc:
+            messagebox.showerror("Could not open output folder", str(exc), parent=self.root)
+            return
+        self.stage = "apply"
+        self.run_status.configure(text="Review the Markdown codebooks before applying them.")
+        self.status_var.set("Output folder opened. Finish your review, then choose Apply.")
+        self._update_workflow_actions()
 
     def apply_reviewed(self) -> None:
         try:
@@ -715,8 +745,7 @@ class SurveyCoderApp:
         self.busy = True
         self.back_button.state(["disabled"])
         self.next_button.state(["disabled"])
-        self.action_button.state(["disabled"])
-        self.review_button.state(["disabled"])
+        self._update_workflow_actions()
         self.run_status.configure(text="Preparing the analysis…")
         self.status_var.set("The analysis is running. This may take a while for large surveys.")
         self.progress.start(12)
@@ -742,9 +771,9 @@ class SurveyCoderApp:
         self.busy = False
         self.back_button.state(["!disabled"] if self.page_index > 0 else ["disabled"])
         self.next_button.state(["!disabled"])
-        self.action_button.state(["!disabled"])
-        self.review_button.state(["!disabled"] if not detail and operation == "generate" else ["disabled"])
         if detail:
+            if operation == "generate":
+                self.stage = "generate"
             self.run_status.configure(text="The run stopped with an error.")
             self.status_var.set("Run failed. Expand the details below or copy the error to share for support.")
             self._append_log("ERROR: " + result)
@@ -759,14 +788,15 @@ class SurveyCoderApp:
                                 if partial_generation else result)
             self._append_log(result)
             if operation == "generate":
-                self.action_button.configure(text="Generate again")
-                self.action_button.state(["!disabled"])
                 has_generated = not result.startswith("Codebook generation: 0/")
-                self.review_button.state(["!disabled"] if has_generated else ["disabled"])
+                self.stage = "review" if has_generated else "generate"
                 if has_generated:
+                    self.run_status.configure(text="Codebooks are ready for human review.")
                     self._append_log("Review the codebooks in the output folder before applying them.")
+                    self.review_button.focus_set()
             elif operation == "apply":
-                self.open_output_button.focus_set()
+                self.stage = "complete"
+                self.apply_button.focus_set()
         self.refresh_summary()
 
     def _append_log(self, text: str) -> None:
