@@ -50,6 +50,28 @@ def codebook_ready(path: Path) -> bool:
         return False
 
 
+def analysis_config(settings: dict) -> dict:
+    """Return a portable analysis setup. Data paths and credentials stay local."""
+    return {
+        "context": settings["context"],
+        "streams": settings["streams"],
+        "llm": {
+            "provider": settings["provider"],
+            "model": settings["model"],
+            "base_url": settings["base_url"] or None,
+            "max_output_tokens": settings["max_output_tokens"],
+        },
+        "analysis": {
+            "output_dir": settings["output_dir"],
+            "prompt_dir": settings["prompt_dir"],
+            "batch_size": settings["batch_size"],
+            "sample_size": settings["sample_size"],
+            "min_length": settings["min_length"],
+            "temperature": settings["temperature"],
+        },
+    }
+
+
 def run_pipeline(settings: dict, operation: str) -> str:
     """Run one or both pipeline stages and return a concise completion message."""
     input_path = settings["input"]
@@ -337,6 +359,8 @@ class SurveyCoderApp:
         self.selected_count.pack(side="left")
         ttk.Button(toolbar, text="Select all", command=lambda: self.select_all(True)).pack(side="right")
         ttk.Button(toolbar, text="Clear", command=lambda: self.select_all(False)).pack(side="right", padx=(0, 6))
+        ttk.Button(toolbar, text="Load analysis setup…", command=self.load_config).pack(
+            side="right", padx=(0, 12))
         self.mapping_canvas = tk.Canvas(mapping, highlightthickness=0, height=250)
         self.mapping_scroll = ttk.Scrollbar(mapping, orient="vertical", command=self.mapping_canvas.yview)
         self.mapping_canvas.configure(yscrollcommand=self.mapping_scroll.set)
@@ -358,8 +382,12 @@ class SurveyCoderApp:
         title.grid(row=0, column=0, sticky="w", pady=(0, 12))
         model = self._section(page, "Model")
         model.grid(row=1, column=0, sticky="ew", pady=(0, 12))
-        ttk.Label(model, text="Choose the service and model that will analyse your responses.",
-                  foreground="#555555").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        ttk.Label(
+            model,
+            text=("Choose the service and model that will analyse your responses. "
+                  "These model preferences are remembered automatically on this device."),
+            foreground="#555555", wraplength=760,
+        ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
         for col in (1, 3):
             model.columnconfigure(col, weight=1)
         ttk.Label(model, text="Provider").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=5)
@@ -451,10 +479,16 @@ class SurveyCoderApp:
         log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
         log_scroll.grid(row=0, column=1, sticky="ns")
         self.log_text.configure(yscrollcommand=log_scroll.set)
+        ttk.Label(
+            page,
+            text=("Analysis setups include model, context, column mappings, output, and processing "
+                  "settings. The data file and API keys are never saved."),
+            foreground="#555555", wraplength=760,
+        ).grid(row=3, column=0, sticky="w", pady=(8, 0))
         actions = ttk.Frame(page)
-        actions.grid(row=3, column=0, sticky="ew", pady=(12, 0))
-        ttk.Button(actions, text="Load configuration…", command=self.load_config).pack(side="left")
-        ttk.Button(actions, text="Save configuration…", command=self.save_config).pack(side="left", padx=(8, 0))
+        actions.grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(actions, text="Load analysis setup…", command=self.load_config).pack(side="left")
+        ttk.Button(actions, text="Save analysis setup…", command=self.save_config).pack(side="left", padx=(8, 0))
         workflow = ttk.Frame(actions)
         workflow.pack(side="right")
         self.action_button = ttk.Button(workflow, text="Generate codebooks",
@@ -951,22 +985,19 @@ class SurveyCoderApp:
         except (ValueError, TypeError) as exc:
             messagebox.showerror("Check your settings", str(exc), parent=self.root)
             return
-        path = filedialog.asksaveasfilename(parent=self.root, defaultextension=".json",
-                                            filetypes=[("JSON", "*.json")])
+        path = filedialog.asksaveasfilename(
+            parent=self.root, title="Save analysis setup", defaultextension=".json",
+            filetypes=[("Analysis setup", "*.json")])
         if path:
-            config = {
-                "context": settings["context"],
-                "streams": settings["streams"],
-                "llm": {"provider": settings["provider"], "model": settings["model"],
-                        "base_url": settings["base_url"] or None,
-                        "max_output_tokens": settings["max_output_tokens"]},
-            }
-            Path(path).write_text(json.dumps(config, indent=2), encoding="utf-8")
-            self._append_log(f"Saved configuration to {path}")
+            Path(path).write_text(
+                json.dumps(analysis_config(settings), indent=2), encoding="utf-8")
+            self._append_log(f"Saved analysis setup to {path} (data file and API keys excluded).")
+            self.status_var.set("Analysis setup saved. The data file and API keys were not included.")
 
     def load_config(self) -> None:
-        path = filedialog.askopenfilename(parent=self.root,
-                                          filetypes=[("JSON configuration", "*.json")])
+        path = filedialog.askopenfilename(
+            parent=self.root, title="Load analysis setup",
+            filetypes=[("Analysis setup", "*.json")])
         if not path:
             return
         try:
@@ -974,9 +1005,12 @@ class SurveyCoderApp:
                 config = json.load(config_file)
             streams = config.get("streams")
             if not isinstance(streams, list) or not streams:
-                raise ValueError("Configuration needs a non-empty streams list.")
+                raise ValueError("Analysis setup needs a non-empty streams list.")
             self.context_var.set(config.get("context", "qualitative survey feedback"))
             llm = config.get("llm", {})
+            analysis = config.get("analysis", {})
+            if not isinstance(llm, dict) or not isinstance(analysis, dict):
+                raise ValueError("The llm and analysis settings must be JSON objects.")
             provider = llm.get("provider", "openai")
             if provider not in ("openai", "google", "vllm"):
                 raise ValueError("Provider must be openai, google, or vllm.")
@@ -995,10 +1029,20 @@ class SurveyCoderApp:
                 "" if max_output_tokens is None else str(max_output_tokens))
             self._last_provider = provider
             self.provider_changed()
+            fields = (
+                ("output_dir", self.output_var), ("prompt_dir", self.prompt_var),
+                ("batch_size", self.batch_var), ("sample_size", self.sample_var),
+                ("min_length", self.min_var), ("temperature", self.temp_var),
+            )
+            for key, variable in fields:
+                if key in analysis:
+                    variable.set(str(analysis[key]))
             rows = {str(stream.get("column")): stream for stream in streams}
+            unavailable = sorted(set(rows) - set(self.stream_rows))
+            available = set(rows) & set(self.stream_rows)
             self.codebook_paths = {
                 column: stream["codebook"] for column, stream in rows.items()
-                if stream.get("codebook")
+                if column in available and stream.get("codebook")
             }
             for column, (include, question, prefix) in self.stream_rows.items():
                 stream = rows.get(column)
@@ -1008,9 +1052,25 @@ class SurveyCoderApp:
                     prefix.set(stream.get("prefix", stream.get("name", column)))
             self.update_selected_count()
             self.refresh_summary()
-            self._append_log(f"Loaded configuration from {path}")
+            loaded_fields = ", ".join(key.replace("_", " ") for key, _ in fields
+                                      if key in analysis)
+            summary = (
+                f"Loaded analysis setup from {path}. Model preferences, context, and "
+                f"{len(available)} column mapping(s) were applied. "
+                + (f"Applied saved settings: {loaded_fields}. " if loaded_fields else
+                   "No saved output or processing settings were present. ")
+                + "The data file and API keys were unchanged."
+            )
+            if unavailable:
+                summary += (" Unavailable mappings were not applied: " +
+                            ", ".join(unavailable) + ". Load the matching data file first.")
+                messagebox.showwarning("Some mappings were not applied", summary, parent=self.root)
+            else:
+                messagebox.showinfo("Analysis setup loaded", summary, parent=self.root)
+            self.status_var.set(summary)
+            self._append_log(summary)
         except (OSError, json.JSONDecodeError, ValueError, AttributeError) as exc:
-            messagebox.showerror("Could not load configuration", str(exc), parent=self.root)
+            messagebox.showerror("Could not load analysis setup", str(exc), parent=self.root)
 
 
 def main() -> None:

@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from survey_coder.gui import SurveyCoderApp, codebook_ready
+from survey_coder.gui import SurveyCoderApp, analysis_config, codebook_ready
 
 
 class FakeButton:
@@ -37,6 +37,26 @@ class FakeProgress:
 
     def grid_remove(self):
         self.visible = False
+
+
+class AnalysisSetupTests(unittest.TestCase):
+    def test_setup_contains_visible_run_settings_but_not_data_or_credentials(self):
+        settings = {
+            "input": "/private/responses.xlsx", "sheet": "Sheet1",
+            "context": "module feedback", "streams": [{"column": "Comment"}],
+            "provider": "vllm", "model": "local-model", "base_url": "http://localhost/v1",
+            "max_output_tokens": 1024, "output_dir": "results", "prompt_dir": "prompts",
+            "batch_size": 8, "sample_size": 200, "min_length": 5, "temperature": 0.2,
+            "api_key": "secret",
+        }
+
+        setup = analysis_config(settings)
+
+        self.assertEqual(setup["analysis"]["batch_size"], 8)
+        self.assertEqual(setup["analysis"]["output_dir"], "results")
+        self.assertNotIn("input", setup)
+        self.assertNotIn("api_key", str(setup))
+        self.assertNotIn("secret", str(setup))
 
 
 class WorkflowActionTests(unittest.TestCase):
