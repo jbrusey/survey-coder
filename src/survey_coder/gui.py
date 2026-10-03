@@ -66,8 +66,17 @@ def run_pipeline(settings: dict, operation: str) -> str:
         }
         generated = []
         failed = []
+        skipped = []
         stream_details = []
+        targets = settings.get("generation_targets")
         for stream in streams:
+            target = (targets or {}).get(stream["name"])
+            if targets is not None and target is None:
+                skipped.append(stream["name"])
+                continue
+            destination = (target or {}).get(
+                "path", str(output_dir / f"{stream['name'].lower()}_codebook.md"))
+            replace = bool((target or {}).get("replace"))
             warnings = []
 
             class StreamLogHandler(logging.Handler):
@@ -82,7 +91,7 @@ def run_pipeline(settings: dict, operation: str) -> str:
                                            id_col, settings["min_length"])
                 result = generate_stream(stream, sample_comments(
                     stream_df, settings["sample_size"], 42), args, id_col,
-                    prompts, settings["context"])
+                    prompts, settings["context"], destination, replace)
                 if result is None:
                     failed.append(stream["name"])
                     reason = "; ".join(warnings) or "No usable themes were returned."
@@ -102,9 +111,13 @@ def run_pipeline(settings: dict, operation: str) -> str:
             summary = [f"Codebook generation: {len(generated)}/{len(streams)} succeeded.",
                        "Generated: " + (", ".join(generated) if generated else "none"),
                        "Failed: " + ", ".join(failed)]
+            if skipped:
+                summary.append("Skipped: " + ", ".join(skipped))
             if stream_details:
                 summary.append("Details:\n- " + "\n- ".join(stream_details))
             return "\n".join(summary)
+        if skipped:
+            stream_details.append("Skipped existing: " + ", ".join(skipped))
         if stream_details:
             return f"Codebooks saved to {output_dir}\n" + "\n".join(stream_details)
 
@@ -638,12 +651,61 @@ class SurveyCoderApp:
             return
         self._run("apply", settings=settings)
 
+    def _generation_targets(self, settings: dict) -> dict[str, dict | None] | None:
+        targets = {}
+        output_dir = Path(settings["output_dir"])
+        for stream in settings["streams"]:
+            path = output_dir / f"{stream['name'].lower()}_codebook.md"
+            if not path.exists():
+                targets[stream["name"]] = {"path": str(path), "replace": False}
+                continue
+            choice = messagebox.askyesnocancel(
+                "Existing codebook",
+                f"A codebook already exists:\n\n{path}\n\n"
+                "Yes: replace it\nNo: save the new draft under another name\nCancel: skip it",
+                default=messagebox.CANCEL, parent=self.root,
+            )
+            if choice is None:
+                targets[stream["name"]] = None
+            elif choice is False:
+                alternate = filedialog.asksaveasfilename(
+                    parent=self.root, title=f"Save new draft for {stream['name']}",
+                    initialdir=str(path.parent), initialfile=f"{path.stem}_draft.md",
+                    defaultextension=".md", filetypes=[("Markdown", "*.md")])
+                if not alternate:
+                    targets[stream["name"]] = None
+                elif Path(alternate).exists():
+                    messagebox.showerror(
+                        "Choose a new filename",
+                        f"That file already exists and will not be replaced:\n\n{alternate}",
+                        parent=self.root,
+                    )
+                    return None
+                else:
+                    targets[stream["name"]] = {"path": alternate, "replace": False}
+            elif messagebox.askyesno(
+                    "Confirm replacement",
+                    f"Replace this codebook?\n\n{path}\n\nThis cannot be undone.",
+                    default=messagebox.NO, parent=self.root):
+                targets[stream["name"]] = {"path": str(path), "replace": True}
+            else:
+                targets[stream["name"]] = None
+        return targets
+
     def _run(self, operation: str, settings: dict | None = None) -> None:
         try:
             settings = settings or self.settings_from_ui(validate_data=True)
         except (ValueError, TypeError) as exc:
             messagebox.showerror("Check your settings", str(exc), parent=self.root)
             return
+        if operation in ("generate", "both"):
+            targets = self._generation_targets(settings)
+            if targets is None:
+                return
+            settings["generation_targets"] = targets
+            if not any(targets.values()):
+                self.status_var.set("Generation cancelled; existing codebooks were preserved.")
+                return
         if operation == "both":
             missing = [s["name"] for s in settings["streams"] if not (
                 Path(settings["output_dir"]) / f"{s['name'].lower()}_codebook.md").is_file()]

@@ -4,6 +4,8 @@ import json
 import time
 import logging
 import argparse
+from datetime import datetime
+from pathlib import Path
 import pandas as pd
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
@@ -43,7 +45,7 @@ def parse_args():
     parser.add_argument("--max-themes-per-batch", type=int, default=20, help="Max themes the LLM should identify per batch")
     parser.add_argument("--max-final-codes", type=int, default=30, help="Max codes in the final consolidated codebook")
     parser.add_argument("--temperature", type=float, default=0.2, help="LLM temperature")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing output directory")
+    parser.add_argument("--overwrite", action="store_true", help="Replace existing codebooks (each affected path is reported)")
     return parser.parse_args()
 
 def validate_columns(df: pd.DataFrame, streams: List[Dict]):
@@ -190,8 +192,8 @@ def build_consolidation_prompt(stream: Dict, batch_themes: List[Dict], max_final
     values = {"context": context, "stream_name": stream["name"], "max_final_codes": max_final_codes, "themes_data": json.dumps(batch_themes, indent=2)}
     return prompts["system"].format(**values), prompts["batch"].format(**values)
 
-def save_markdown_codebook(path: str, codebook: Dict):
-    with open(path, 'w') as f:
+def save_markdown_codebook(path: str, codebook: Dict, replace: bool = False):
+    with open(path, 'w' if replace else 'x') as f:
         f.write(f"# {codebook['codebook_name']}\n\n")
         f.write(f"Stream: {codebook['stream']}\n\n")
         
@@ -224,8 +226,13 @@ def save_markdown_codebook(path: str, codebook: Dict):
             
             f.write("---\n\n")
 
-def process_stream(stream: Dict, df: pd.DataFrame, args: argparse.Namespace, id_col: str, prompts: Dict[str, str], context: str):
-    stream_name, comment_col = stream["name"], stream["column"]
+def process_stream(stream: Dict, df: pd.DataFrame, args: argparse.Namespace, id_col: str, prompts: Dict[str, str], context: str,
+                   destination: Optional[str] = None, replace: bool = False):
+    stream_name = stream["name"]
+    destination = destination or os.path.join(args.output_dir, f"{stream_name.lower()}_codebook.md")
+    if os.path.exists(destination) and not replace:
+        logger.warning(f"Preserving existing codebook: {destination}")
+        return None
     logger.info(f"--- Processing {stream_name} Stream ---")
     
     batch_out_dir = os.path.join(args.output_dir, "batch_outputs")
@@ -286,8 +293,8 @@ def process_stream(stream: Dict, df: pd.DataFrame, args: argparse.Namespace, id_
                 not isinstance(final_codebook.get("codes"), list)):
             raise ValueError("Consolidation response is missing codebook_name, stream, or codes.")
         
-        md_path = os.path.join(args.output_dir, f"{stream_name.lower()}_codebook.md")
-        save_markdown_codebook(md_path, final_codebook)
+        Path(destination).parent.mkdir(parents=True, exist_ok=True)
+        save_markdown_codebook(destination, final_codebook, replace)
 
         return final_codebook
     except Exception as e:
@@ -310,10 +317,6 @@ def main():
         logger.error("vLLM requires a base URL (set llm.base_url in config or pass --openai-base-url).")
         sys.exit(1)
     
-    if os.path.exists(args.output_dir) and not args.overwrite:
-        logger.error(f"Output directory {args.output_dir} already exists. Use --overwrite to replace.")
-        sys.exit(1)
-    
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Validate API keys based on provider
@@ -334,9 +337,16 @@ def main():
         prompts = {name: load_prompt(args.prompt_dir, name) for name in ("discover_system.txt", "discover_batch.txt", "consolidate_system.txt", "consolidate.txt")}
         prompts = {"system": prompts["discover_system.txt"], "batch": prompts["discover_batch.txt"], **prompts}
         for stream in streams:
+            destination = os.path.join(args.output_dir, f"{stream['name'].lower()}_codebook.md")
+            replace = args.overwrite and os.path.exists(destination)
+            if os.path.exists(destination) and not replace:
+                logger.warning(f"Skipping existing codebook: {destination} (use --overwrite to replace)")
+                continue
+            if replace:
+                logger.warning(f"Replacing existing codebook: {destination}")
             stream_df = extract_stream(df, stream["name"], stream["column"], id_col, args.min_length)
             sampled = sample_comments(stream_df, args.sample_size, args.random_seed)
-            process_stream(stream, sampled, args, id_col, prompts, config["context"])
+            process_stream(stream, sampled, args, id_col, prompts, config["context"], destination, replace)
         
         logger.info("Pipeline complete. Codebooks generated successfully.")
         
