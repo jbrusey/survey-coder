@@ -10,6 +10,7 @@ class FakeButton:
     def __init__(self):
         self.enabled = None
         self.text = ""
+        self.focused = False
 
     def configure(self, **options):
         self.text = options.get("text", self.text)
@@ -17,10 +18,25 @@ class FakeButton:
     def state(self, states):
         self.enabled = "!disabled" in states
 
+    def focus_set(self):
+        self.focused = True
+
 
 class FakeVariable:
     def set(self, value):
         self.value = value
+
+
+class FakeProgress:
+    def __init__(self):
+        self.stopped = False
+        self.visible = True
+
+    def stop(self):
+        self.stopped = True
+
+    def grid_remove(self):
+        self.visible = False
 
 
 class WorkflowActionTests(unittest.TestCase):
@@ -71,6 +87,31 @@ class WorkflowActionTests(unittest.TestCase):
 
             app.open_output_dir.assert_called_once_with()
             self.assertTrue(app.apply_button.enabled)
+
+    def test_partial_generation_hides_progress_without_claiming_success(self):
+        app = self.make_app([])
+        app.busy = True
+        app.page_index = 2
+        app.progress = FakeProgress()
+        app.progress_var = FakeVariable()
+        app.back_button = FakeButton()
+        app.next_button = FakeButton()
+        app.run_status = FakeButton()
+        app.status_var = FakeVariable()
+        app._append_log = Mock()
+        app.refresh_summary = Mock()
+
+        app._finished(
+            "generate",
+            "Codebook generation: 1/2 succeeded.\nGenerated: one\nFailed: two",
+            None,
+        )
+
+        self.assertFalse(app.progress.visible)
+        self.assertEqual(app.progress_var.value, 0)
+        self.assertEqual(app.run_status.text, "Partial result — some codebooks failed.")
+        self.assertIn("Partial result", app.status_var.value)
+        self.assertEqual(app.stage, "review")
 
 
 if __name__ == "__main__":

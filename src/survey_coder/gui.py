@@ -440,6 +440,7 @@ class SurveyCoderApp:
         self.progress = ttk.Progressbar(self.work, variable=self.progress_var,
                                         maximum=100, mode="indeterminate")
         self.progress.grid(row=1, column=0, sticky="ew", pady=(9, 12))
+        self.progress.grid_remove()
         log_frame = ttk.Frame(self.work)
         log_frame.grid(row=2, column=0, sticky="nsew")
         log_frame.columnconfigure(0, weight=1)
@@ -776,14 +777,16 @@ class SurveyCoderApp:
         self.back_button.state(["disabled"])
         self.next_button.state(["disabled"])
         self._update_workflow_actions()
-        self.run_status.configure(text="Preparing the analysis…")
-        self.status_var.set("The analysis is running. This may take a while for large surveys.")
+        self.run_status.configure(text="Running — preparing the analysis…")
+        self.status_var.set("Running — the analysis may take a while for large surveys.")
+        self.progress_var.set(0)
+        self.progress.grid()
         self.progress.start(12)
         self._append_log(f"Starting {operation} for {len(settings['streams'])} response column(s).")
         if operation in ("generate", "both"):
-            self.run_status.configure(text="Generating codebooks from the selected responses…")
+            self.run_status.configure(text="Running — generating codebooks from the selected responses…")
         elif operation == "apply":
-            self.run_status.configure(text="Applying the reviewed codebooks to the dataset…")
+            self.run_status.configure(text="Running — applying the reviewed codebooks to the dataset…")
         worker = threading.Thread(target=self._worker, args=(settings, operation), daemon=True)
         worker.start()
 
@@ -798,30 +801,33 @@ class SurveyCoderApp:
 
     def _finished(self, operation: str, result: str, detail: str | None) -> None:
         self.progress.stop()
+        self.progress_var.set(0)
+        self.progress.grid_remove()
         self.busy = False
         self.back_button.state(["!disabled"] if self.page_index > 0 else ["disabled"])
         self.next_button.state(["!disabled"])
         if detail:
             if operation == "generate":
                 self.stage = "generate"
-            self.run_status.configure(text="The run stopped with an error.")
-            self.status_var.set("Run failed. Expand the details below or copy the error to share for support.")
+            self.run_status.configure(text="Error — the run failed.")
+            self.status_var.set("Run failed. See the log below for details.")
             self._append_log("ERROR: " + result)
             self._append_log(detail)
         else:
             partial_generation = (operation in ("generate", "both") and
                                   result.startswith("Codebook generation:") and
                                   "Failed:" in result)
-            self.run_status.configure(text=("Generation finished with failures."
+            self.run_status.configure(text=("Partial result — some codebooks failed."
                                             if partial_generation else "Run complete."))
-            self.status_var.set("Some codebooks could not be generated. See run details."
+            self.status_var.set("Partial result — some codebooks failed. See the log below."
                                 if partial_generation else result)
             self._append_log(result)
             if operation == "generate":
                 has_generated = not result.startswith("Codebook generation: 0/")
                 self.stage = "review" if has_generated else "generate"
                 if has_generated:
-                    self.run_status.configure(text="Codebooks are ready for human review.")
+                    if not partial_generation:
+                        self.run_status.configure(text="Run complete — codebooks are ready for review.")
                     self._append_log("Review the codebooks in the output folder before applying them.")
                     self.review_button.focus_set()
             elif operation == "apply":
