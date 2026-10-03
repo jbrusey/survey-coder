@@ -17,7 +17,7 @@ import tkinter as tk
 
 import pandas as pd
 
-from .apply_codebooks import process_stream as apply_stream
+from .apply_codebooks import extract_codes_from_md, process_stream as apply_stream
 from .config import load_prompt
 from .generate_codebooks import (
     ensure_id_column,
@@ -36,6 +36,18 @@ def build_streams(columns: list[str], question: str) -> list[dict[str, str]]:
          "question": question or "What does this response say?", "prefix": column}
         for column in columns
     ]
+
+
+def codebook_path(stream: dict, output_dir: str | Path) -> Path:
+    return Path(stream.get("codebook") or
+                Path(output_dir) / f"{stream['name'].lower()}_codebook.md")
+
+
+def codebook_ready(path: Path) -> bool:
+    try:
+        return path.is_file() and bool(extract_codes_from_md(str(path)))
+    except (OSError, UnicodeError):
+        return False
 
 
 def run_pipeline(settings: dict, operation: str) -> str:
@@ -75,7 +87,7 @@ def run_pipeline(settings: dict, operation: str) -> str:
                 skipped.append(stream["name"])
                 continue
             destination = (target or {}).get(
-                "path", str(output_dir / f"{stream['name'].lower()}_codebook.md"))
+                "path", str(codebook_path(stream, output_dir)))
             replace = bool((target or {}).get("replace"))
             warnings = []
 
@@ -127,8 +139,7 @@ def run_pipeline(settings: dict, operation: str) -> str:
                    "batch": load_prompt(settings["prompt_dir"], "code_batch.txt")}
         results = []
         for stream in streams:
-            stream = dict(stream, codebook=str(output_dir /
-                                                f"{stream['name'].lower()}_codebook.md"))
+            stream = dict(stream, codebook=str(codebook_path(stream, output_dir)))
             result, codes = apply_stream(df, stream, id_col, args,
                                          settings["context"], prompts)
             results.append((stream, result, codes))
@@ -172,6 +183,7 @@ class SurveyCoderApp:
         self.progress_var = tk.DoubleVar(value=0)
         self.df: pd.DataFrame | None = None
         self.stream_rows: dict[str, tuple[tk.BooleanVar, tk.StringVar, tk.StringVar]] = {}
+        self.codebook_paths: dict[str, str] = {}
         self.busy = False
         self.stage = "generate"
         self.preferences_path = self._preferences_path()
@@ -183,6 +195,7 @@ class SurveyCoderApp:
         for variable in (self.provider_var, self.model_var, self.base_var,
                          self.max_output_tokens_var):
             variable.trace_add("write", self._schedule_save_llm_preferences)
+        self.output_var.trace_add("write", lambda *_: self._update_workflow_actions())
         self.root.protocol("WM_DELETE_WINDOW", self._close)
 
     @staticmethod
@@ -559,6 +572,7 @@ class SurveyCoderApp:
         for child in self.mapping_inner.winfo_children():
             child.destroy()
         self.stream_rows.clear()
+        self.codebook_paths.clear()
         headers = ("Analyse", "Response column", "Question wording", "Output prefix")
         widths = (9, 23, 38, 16)
         for col, (text, width) in enumerate(zip(headers, widths)):
@@ -589,6 +603,8 @@ class SurveyCoderApp:
         if hasattr(self, "selected_count"):
             count = sum(include.get() for include, _question, _prefix in self.stream_rows.values())
             self.selected_count.configure(text=f"{count} column{'s' if count != 1 else ''} selected")
+        if hasattr(self, "apply_button"):
+            self._update_workflow_actions()
 
     def settings_from_ui(self, validate_data: bool = False) -> dict:
         streams = []
@@ -596,9 +612,12 @@ class SurveyCoderApp:
             if include.get():
                 if not question.get().strip():
                     raise ValueError(f"Add the survey question for column “{column}”.")
-                streams.append({"name": column, "column": column,
-                                "question": question.get().strip(),
-                                "prefix": prefix.get().strip() or column})
+                stream = {"name": column, "column": column,
+                          "question": question.get().strip(),
+                          "prefix": prefix.get().strip() or column}
+                if column in self.codebook_paths:
+                    stream["codebook"] = self.codebook_paths[column]
+                streams.append(stream)
         if not self.input_var.get() or not streams:
             raise ValueError("Choose a data file and select at least one response column.")
         if validate_data and not Path(self.input_var.get()).is_file():
@@ -635,14 +654,26 @@ class SurveyCoderApp:
                                                  if settings["max_output_tokens"] else "provider/server default"),
                      f"Output: {settings['output_dir']}",
                      "Generate codebooks if needed, review the Markdown files, then apply them."]
+            ready, total = self._codebook_readiness(settings)
+            lines.insert(-1, f"Codebooks: {ready} of {total} ready")
             self.summary_text.configure(text="\n".join(lines))
             self._update_workflow_actions()
         except Exception as exc:
             self.summary_text.configure(text=str(exc))
             self._update_workflow_actions(valid=False)
 
+    def _codebook_readiness(self, settings: dict | None = None) -> tuple[int, int]:
+        try:
+            settings = settings or self.settings_from_ui()
+        except (ValueError, TypeError):
+            return 0, 0
+        paths = [codebook_path(stream, settings["output_dir"])
+                 for stream in settings["streams"]]
+        return sum(codebook_ready(path) for path in paths), len(paths)
+
     def _update_workflow_actions(self, valid: bool = True) -> None:
         disabled = self.busy or not valid
+        ready, total = self._codebook_readiness() if valid else (0, 0)
         self.action_button.configure(
             text="Generate codebooks" if self.stage == "generate" else "Generate again")
         self.apply_button.configure(
@@ -650,8 +681,7 @@ class SurveyCoderApp:
         self.action_button.state(["disabled"] if disabled else ["!disabled"])
         self.review_button.state(["disabled"] if disabled else ["!disabled"])
         self.apply_button.state(
-            ["!disabled"] if not disabled and self.stage in ("apply", "complete")
-            else ["disabled"])
+            ["!disabled"] if not disabled and total > 0 and ready == total else ["disabled"])
 
     def run_action(self) -> None:
         self._run("generate")
@@ -670,12 +700,12 @@ class SurveyCoderApp:
     def apply_reviewed(self) -> None:
         try:
             settings = self.settings_from_ui(validate_data=True)
-            missing = [str(Path(settings["output_dir"]) /
-                           f"{s['name'].lower()}_codebook.md") for s in settings["streams"]
-                       if not (Path(settings["output_dir"]) /
-                               f"{s['name'].lower()}_codebook.md").is_file()]
+            missing = [str(codebook_path(stream, settings["output_dir"]))
+                       for stream in settings["streams"]
+                       if not codebook_ready(codebook_path(stream, settings["output_dir"]))]
             if missing:
-                raise ValueError("Generate the codebooks first. Missing:\n" + "\n".join(missing))
+                raise ValueError("Every selected column needs a valid codebook. Not ready:\n" +
+                                 "\n".join(missing))
         except (ValueError, TypeError) as exc:
             messagebox.showerror("Cannot apply codebooks", str(exc), parent=self.root)
             return
@@ -685,7 +715,7 @@ class SurveyCoderApp:
         targets = {}
         output_dir = Path(settings["output_dir"])
         for stream in settings["streams"]:
-            path = output_dir / f"{stream['name'].lower()}_codebook.md"
+            path = codebook_path(stream, output_dir)
             if not path.exists():
                 targets[stream["name"]] = {"path": str(path), "replace": False}
                 continue
@@ -737,8 +767,8 @@ class SurveyCoderApp:
                 self.status_var.set("Generation cancelled; existing codebooks were preserved.")
                 return
         if operation == "both":
-            missing = [s["name"] for s in settings["streams"] if not (
-                Path(settings["output_dir"]) / f"{s['name'].lower()}_codebook.md").is_file()]
+            missing = [s["name"] for s in settings["streams"]
+                       if not codebook_ready(codebook_path(s, settings["output_dir"]))]
             if missing:
                 messagebox.showerror("Cannot run both", "Run both needs an existing codebook for every selected column. Missing: " + ", ".join(missing), parent=self.root)
                 return
@@ -960,6 +990,10 @@ class SurveyCoderApp:
             self._last_provider = provider
             self.provider_changed()
             rows = {str(stream.get("column")): stream for stream in streams}
+            self.codebook_paths = {
+                column: stream["codebook"] for column, stream in rows.items()
+                if stream.get("codebook")
+            }
             for column, (include, question, prefix) in self.stream_rows.items():
                 stream = rows.get(column)
                 include.set(stream is not None)
@@ -967,6 +1001,7 @@ class SurveyCoderApp:
                     question.set(stream.get("question", ""))
                     prefix.set(stream.get("prefix", stream.get("name", column)))
             self.update_selected_count()
+            self.refresh_summary()
             self._append_log(f"Loaded configuration from {path}")
         except (OSError, json.JSONDecodeError, ValueError, AttributeError) as exc:
             messagebox.showerror("Could not load configuration", str(exc), parent=self.root)
