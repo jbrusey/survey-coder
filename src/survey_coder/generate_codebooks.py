@@ -5,7 +5,6 @@ import time
 import logging
 import argparse
 import pandas as pd
-from datetime import datetime
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
 import google.generativeai as genai
@@ -339,25 +338,6 @@ def main():
             sampled = sample_comments(stream_df, args.sample_size, args.random_seed)
             process_stream(stream, sampled, args, id_col, prompts, config["context"])
         
-        summary = {
-            "timestamp": datetime.now().isoformat(),
-            "input_file": args.input,
-            "total_rows_loaded": len(df),
-            "streams": [{"name": s["name"], "column": s["column"]} for s in streams],
-            "sample_size_per_stream": args.sample_size,
-            "batch_size": args.batch_size,
-            "model": args.model,
-            "provider": args.provider,
-            "outputs_produced": [
-                *[f"{args.output_dir}/{s['name'].lower()}_codebook.md" for s in streams],
-                f"{args.output_dir}/run_summary.json",
-                f"{args.output_dir}/batch_outputs/ (raw discovery JSON)"
-            ]
-        }
-        
-        with open(os.path.join(args.output_dir, "run_summary.json"), 'w') as f:
-            json.dump(summary, f, indent=2)
-            
         logger.info("Pipeline complete. Codebooks generated successfully.")
         
     except Exception as e:
