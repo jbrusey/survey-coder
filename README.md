@@ -39,7 +39,7 @@ A portable Tkinter GUI is included for Windows, macOS, and Linux. It selects CSV
 uv run survey-coder-gui
 ```
 
-Choose **OpenAI**, **Google**, or **vLLM** on the model step. For vLLM, enter an OpenAI-compatible `/v1` endpoint, or set `VLLM_BASE_URL` before launching the GUI. Set `VLLM_API_KEY` in the environment for an authenticated endpoint. Save/load configuration stores the provider, model, endpoint, context, and stream mappings; credentials are never saved.
+Choose **OpenAI**, **Google**, or **vLLM** on the model step. The GUI remembers the last provider, model, endpoint, and output-token limit between launches. For vLLM, enter an OpenAI-compatible `/v1` endpoint, or set `VLLM_BASE_URL` before launching the GUI, then choose **Refresh models** to retrieve model IDs from the server. If discovery fails, you can still type a model ID manually. Set `VLLM_API_KEY` in the environment for an authenticated endpoint. Save/load configuration stores the provider, model, endpoint, context, and stream mappings; API keys are read from the environment and are never saved.
 
 ### 3. API Keys
 Create a `.env` file in your **home directory** (`~/.env`) or the **project root** (`./.env`) with your keys:
@@ -93,7 +93,7 @@ The config contains a `streams` list and can optionally hold reusable LLM defaul
   ]
 }
 ```
-Supported provider values are `openai`, `google`, and `vllm`. CLI flags such as `--provider`, `--model`, and `--openai-base-url` override the corresponding config defaults. vLLM uses the OpenAI-compatible endpoint and `VLLM_API_KEY` environment variable when authentication is enabled.
+Supported provider values are `openai`, `google`, and `vllm`. The GUI’s editable max-output-token field defaults to `32768` when vLLM is selected; other providers leave it blank. CLI flags such as `--provider`, `--model`, `--openai-base-url`, and `--max-output-tokens` override the corresponding config defaults. Set optional `llm.max_output_tokens` to a positive integer to configure an explicit limit, or omit it in CLI/config use to let the provider/server choose. The GUI saves this setting with the endpoint. vLLM uses the OpenAI-compatible endpoint and `VLLM_API_KEY` environment variable when authentication is enabled.
 **Output:** one codebook per configured stream.
 
 ### Phase 1.5: Human Refinement (Optional)

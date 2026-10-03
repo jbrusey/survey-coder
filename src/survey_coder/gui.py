@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 import threading
@@ -9,6 +10,9 @@ import traceback
 from pathlib import Path
 from types import SimpleNamespace
 from tkinter import filedialog, messagebox, ttk
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 import tkinter as tk
 
 import pandas as pd
@@ -18,6 +22,7 @@ from .config import load_prompt
 from .generate_codebooks import (
     ensure_id_column,
     extract_stream,
+    logger as generation_logger,
     process_stream as generate_stream,
     sample_comments,
     validate_columns,
@@ -47,23 +52,61 @@ def run_pipeline(settings: dict, operation: str) -> str:
     common = dict(
         model=settings["model"], provider=settings["provider"],
         openai_base_url=settings["base_url"], temperature=settings["temperature"],
-        batch_size=settings["batch_size"],
+        batch_size=settings["batch_size"], max_output_tokens=settings["max_output_tokens"],
     )
 
     if operation in ("generate", "both"):
         args = SimpleNamespace(output_dir=str(output_dir), **common,
                                max_themes_per_batch=20, max_final_codes=30)
-        prompts = {name: load_prompt(settings["prompt_dir"], name) for name in
-                   ("discover_system.txt", "discover_batch.txt",
-                    "consolidate_system.txt", "consolidate.txt")}
-        prompts = {"system": prompts["discover_system.txt"],
-                   "batch": prompts["discover_batch.txt"], **prompts}
+        prompts = {
+            "system": load_prompt(settings["prompt_dir"], "discover_system.txt"),
+            "batch": load_prompt(settings["prompt_dir"], "discover_batch.txt"),
+            "consolidate_system": load_prompt(settings["prompt_dir"], "consolidate_system.txt"),
+            "consolidate": load_prompt(settings["prompt_dir"], "consolidate.txt"),
+        }
+        generated = []
+        failed = []
+        stream_details = []
         for stream in streams:
-            stream_df = extract_stream(df, stream["name"], stream["column"],
-                                       id_col, settings["min_length"])
-            generate_stream(stream, sample_comments(
-                stream_df, settings["sample_size"], 42), args, id_col,
-                prompts, settings["context"])
+            warnings = []
+
+            class StreamLogHandler(logging.Handler):
+                def emit(self, record):
+                    if record.levelno >= logging.WARNING:
+                        warnings.append(record.getMessage())
+
+            log_handler = StreamLogHandler()
+            generation_logger.addHandler(log_handler)
+            try:
+                stream_df = extract_stream(df, stream["name"], stream["column"],
+                                           id_col, settings["min_length"])
+                result = generate_stream(stream, sample_comments(
+                    stream_df, settings["sample_size"], 42), args, id_col,
+                    prompts, settings["context"])
+                if result is None:
+                    failed.append(stream["name"])
+                    reason = "; ".join(warnings) or "No usable themes were returned."
+                    stream_details.append(f"{stream['name']}: no codebook was produced. {reason}")
+                else:
+                    generated.append(stream["name"])
+                    if warnings:
+                        stream_details.append(
+                            f"{stream['name']} warnings: " + "; ".join(warnings))
+            except Exception as exc:
+                failed.append(stream["name"])
+                stream_details.append(f"{stream['name']}: {exc}")
+            finally:
+                generation_logger.removeHandler(log_handler)
+
+        if failed:
+            summary = [f"Codebook generation: {len(generated)}/{len(streams)} succeeded.",
+                       "Generated: " + (", ".join(generated) if generated else "none"),
+                       "Failed: " + ", ".join(failed)]
+            if stream_details:
+                summary.append("Details:\n- " + "\n- ".join(stream_details))
+            return "\n".join(summary)
+        if stream_details:
+            return f"Codebooks saved to {output_dir}\n" + "\n".join(stream_details)
 
     if operation in ("apply", "both"):
         args = SimpleNamespace(**common, max_rows=None)
@@ -111,14 +154,80 @@ class SurveyCoderApp:
         self.sample_var = tk.StringVar(value="1000")
         self.min_var = tk.StringVar(value="5")
         self.temp_var = tk.StringVar(value="0.0")
+        self.max_output_tokens_var = tk.StringVar(value="")
         self.status_var = tk.StringVar(value="Choose a data file to begin.")
         self.progress_var = tk.DoubleVar(value=0)
         self.df: pd.DataFrame | None = None
         self.stream_rows: dict[str, tuple[tk.BooleanVar, tk.StringVar, tk.StringVar]] = {}
         self.busy = False
         self.stage = "generate"
+        self.preferences_path = self._preferences_path()
+        self.preferences_after: str | None = None
+        self._load_llm_preferences()
+        self._last_provider = self.provider_var.get()
 
         self._build()
+        for variable in (self.provider_var, self.model_var, self.base_var,
+                         self.max_output_tokens_var):
+            variable.trace_add("write", self._schedule_save_llm_preferences)
+        self.root.protocol("WM_DELETE_WINDOW", self._close)
+
+    @staticmethod
+    def _preferences_path() -> Path:
+        if sys.platform == "darwin":
+            config_root = Path.home() / "Library" / "Application Support"
+            return config_root / "Survey Coder" / "settings.json"
+        if os.name == "nt":
+            config_root = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+            return config_root / "Survey Coder" / "settings.json"
+        config_root = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        return config_root / "survey-coder" / "settings.json"
+
+    def _load_llm_preferences(self) -> None:
+        try:
+            preferences = json.loads(self.preferences_path.read_text(encoding="utf-8"))
+            provider = preferences.get("provider", "openai")
+            if provider not in ("openai", "google", "vllm"):
+                return
+            self.provider_var.set(provider)
+            self.model_var.set(preferences.get("model", "gpt-4o-mini"))
+            self.base_var.set(preferences.get("base_url") or
+                              (os.environ.get("VLLM_BASE_URL", "") if provider == "vllm" else ""))
+            max_output_tokens = preferences.get("max_output_tokens")
+            if provider == "vllm" and "max_output_tokens" not in preferences:
+                max_output_tokens = 32768
+            self.max_output_tokens_var.set(
+                "" if max_output_tokens is None else str(max_output_tokens))
+        except (OSError, json.JSONDecodeError, AttributeError, TypeError):
+            pass
+
+    def _schedule_save_llm_preferences(self, *_args) -> None:
+        if self.preferences_after is not None:
+            self.root.after_cancel(self.preferences_after)
+        self.preferences_after = self.root.after(500, self._save_llm_preferences)
+
+    def _save_llm_preferences(self) -> None:
+        self.preferences_after = None
+        preferences = {
+            "provider": self.provider_var.get(),
+            "model": self.model_var.get(),
+            "base_url": self.base_var.get(),
+            "max_output_tokens": self.max_output_tokens_var.get(),
+        }
+        try:
+            self.preferences_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_path = self.preferences_path.with_suffix(".tmp")
+            temporary_path.write_text(json.dumps(preferences, indent=2), encoding="utf-8")
+            temporary_path.replace(self.preferences_path)
+        except OSError as exc:
+            self.status_var.set(f"Could not save local model preferences: {exc}")
+
+    def _close(self) -> None:
+        if self.preferences_after is not None:
+            self.root.after_cancel(self.preferences_after)
+            self.preferences_after = None
+        self._save_llm_preferences()
+        self.root.destroy()
 
     def _build(self) -> None:
         outer = ttk.Frame(self.root, padding=(24, 20, 24, 16))
@@ -233,15 +342,27 @@ class SurveyCoderApp:
         provider.grid(row=1, column=1, sticky="ew", pady=5)
         provider.bind("<<ComboboxSelected>>", self.provider_changed)
         ttk.Label(model, text="Model name").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=5)
-        ttk.Entry(model, textvariable=self.model_var).grid(row=2, column=1, sticky="ew", pady=5)
+        self.model_box = ttk.Combobox(model, textvariable=self.model_var, state="normal")
+        self.model_box.grid(row=2, column=1, sticky="ew", pady=5)
+        self.refresh_models_button = ttk.Button(model, text="Refresh models",
+                                                command=self.refresh_vllm_models)
+        self.refresh_models_button.grid(row=2, column=2, sticky="w", padx=(8, 0), pady=5)
         self.base_label = ttk.Label(model, text="Compatible API URL")
         self.base_label.grid(row=3, column=0, sticky="w", padx=(0, 8), pady=5)
         self.base_entry = ttk.Entry(model, textvariable=self.base_var)
         self.base_entry.grid(row=3, column=1, sticky="ew", pady=5)
         ttk.Label(model, text="Context").grid(row=1, column=2, sticky="w", padx=(18, 8), pady=5)
         ttk.Entry(model, textvariable=self.context_var).grid(row=1, column=3, sticky="ew", pady=5)
-        ttk.Label(model, text="Used to frame what the comments are about.",
-                  foreground="#555555").grid(row=2, column=2, columnspan=2, sticky="w", padx=(18, 0))
+        self.model_help = ttk.Label(model, text="Used to frame what the comments are about.",
+                                    foreground="#555555", wraplength=360)
+        self.model_help.grid(row=3, column=2, columnspan=2, sticky="w", padx=(18, 0))
+        ttk.Label(model, text="Max output tokens").grid(
+            row=4, column=0, sticky="w", padx=(0, 8), pady=(8, 3))
+        ttk.Entry(model, textvariable=self.max_output_tokens_var, width=14).grid(
+            row=4, column=1, sticky="w", pady=(8, 3))
+        ttk.Label(model, text="vLLM default: 32,768. Adjust to your server’s limit.",
+                  foreground="#555555", wraplength=360).grid(
+            row=4, column=2, columnspan=2, sticky="w", padx=(18, 0), pady=(8, 3))
 
         output = self._section(page, "Output")
         output.grid(row=2, column=0, sticky="ew", pady=(0, 12))
@@ -469,6 +590,8 @@ class SurveyCoderApp:
             "output_dir": self.output_var.get().strip(), "prompt_dir": self.prompt_var.get().strip(),
             "batch_size": int(self.batch_var.get()), "sample_size": int(self.sample_var.get()),
             "min_length": int(self.min_var.get()), "temperature": float(self.temp_var.get()),
+            "max_output_tokens": (int(self.max_output_tokens_var.get())
+                                  if self.max_output_tokens_var.get().strip() else None),
         }
         if not settings["model"] or not settings["output_dir"]:
             raise ValueError("Enter a model name and output folder.")
@@ -476,6 +599,8 @@ class SurveyCoderApp:
             raise ValueError("Enter a vLLM API URL or set VLLM_BASE_URL.")
         if settings["batch_size"] < 1 or settings["sample_size"] < 1 or settings["min_length"] < 0:
             raise ValueError("Batch size and sample size must be positive; minimum text length cannot be negative.")
+        if settings["max_output_tokens"] is not None and settings["max_output_tokens"] < 1:
+            raise ValueError("Maximum output tokens must be a positive integer, or left blank for the server default.")
         if not 0 <= settings["temperature"] <= 2:
             raise ValueError("Temperature must be between 0 and 2.")
         return settings
@@ -486,6 +611,8 @@ class SurveyCoderApp:
             lines = [f"File: {Path(settings['input']).name}",
                      f"Columns: {', '.join(s['column'] for s in settings['streams'])}",
                      f"Model: {settings['provider']} / {settings['model']}",
+                     "Output token limit: " + (str(settings["max_output_tokens"])
+                                                 if settings["max_output_tokens"] else "provider/server default"),
                      f"Output: {settings['output_dir']}",
                      "First step: generate codebooks, review the Markdown files, then apply them."]
             self.summary_text.configure(text="\n".join(lines))
@@ -553,7 +680,7 @@ class SurveyCoderApp:
         self.busy = False
         self.back_button.state(["!disabled"] if self.page_index > 0 else ["disabled"])
         self.next_button.state(["!disabled"])
-        self.action_button.state(["!disabled"] if detail else [])
+        self.action_button.state(["!disabled"])
         self.review_button.state(["!disabled"] if not detail and operation == "generate" else ["disabled"])
         if detail:
             self.run_status.configure(text="The run stopped with an error.")
@@ -561,13 +688,21 @@ class SurveyCoderApp:
             self._append_log("ERROR: " + result)
             self._append_log(detail)
         else:
-            self.run_status.configure(text="Run complete.")
-            self.status_var.set(result)
+            partial_generation = (operation in ("generate", "both") and
+                                  result.startswith("Codebook generation:") and
+                                  "Failed:" in result)
+            self.run_status.configure(text=("Generation finished with failures."
+                                            if partial_generation else "Run complete."))
+            self.status_var.set("Some codebooks could not be generated. See run details."
+                                if partial_generation else result)
             self._append_log(result)
             if operation == "generate":
                 self.action_button.configure(text="Generate again")
-                self.review_button.state(["!disabled"])
-                self._append_log("Review the codebooks in the output folder before applying them.")
+                self.action_button.state(["!disabled"])
+                has_generated = not result.startswith("Codebook generation: 0/")
+                self.review_button.state(["!disabled"] if has_generated else ["disabled"])
+                if has_generated:
+                    self._append_log("Review the codebooks in the output folder before applying them.")
             elif operation == "apply":
                 self.open_output_button.focus_set()
         self.refresh_summary()
@@ -586,6 +721,10 @@ class SurveyCoderApp:
 
     def provider_changed(self, *_args) -> None:
         provider = self.provider_var.get()
+        if provider == "vllm" and getattr(self, "_last_provider", None) != "vllm":
+            if not self.max_output_tokens_var.get().strip():
+                self.max_output_tokens_var.set("32768")
+        self._last_provider = provider
         needs_endpoint = provider in ("openai", "vllm")
         self.base_label.configure(text="vLLM API URL" if provider == "vllm" else "Compatible API URL")
         if provider == "vllm" and not self.base_var.get().strip():
@@ -593,6 +732,68 @@ class SurveyCoderApp:
         state = "normal" if needs_endpoint else "disabled"
         self.base_entry.configure(state=state)
         self.base_label.configure(foreground="#222222" if needs_endpoint else "#888888")
+        if provider == "vllm":
+            if self.model_var.get() == "gpt-4o-mini":
+                self.model_var.set("")
+            self.refresh_models_button.state(["!disabled"])
+            self.model_box.configure(state="normal")
+            self.model_help.configure(text="Choose Refresh models to query the server. If discovery fails, enter a model ID manually.")
+        else:
+            self.refresh_models_button.state(["disabled"])
+            self.model_box.configure(state="normal")
+            self.model_help.configure(text="Used to frame what the comments are about.")
+
+    def refresh_vllm_models(self) -> None:
+        if self.provider_var.get() != "vllm":
+            return
+        endpoint = self.base_var.get().strip().rstrip("/")
+        parsed = urlparse(endpoint)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            messagebox.showerror(
+                "Invalid vLLM URL",
+                "Enter a full server URL, for example http://localhost:8000/v1.",
+                parent=self.root,
+            )
+            return
+        models_url = endpoint if parsed.path.endswith("/models") else f"{endpoint}/models"
+        self.refresh_models_button.state(["disabled"])
+        self.model_help.configure(text="Querying the vLLM server…")
+        self.status_var.set("Retrieving available models from vLLM…")
+        api_key = os.environ.get("VLLM_API_KEY")
+
+        def fetch() -> None:
+            try:
+                headers = {"Accept": "application/json"}
+                if api_key:
+                    headers["Authorization"] = f"Bearer {api_key}"
+                request = Request(models_url, headers=headers)
+                with urlopen(request, timeout=20) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                models = sorted({item["id"] for item in payload.get("data", [])
+                                 if isinstance(item, dict) and item.get("id")})
+                if not models:
+                    raise ValueError("The server returned no model IDs.")
+                self.root.after(0, lambda: self._models_loaded(models))
+            except (HTTPError, URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError) as exc:
+                message = str(exc)
+                self.root.after(0, lambda: self._models_failed(message))
+
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def _models_loaded(self, models: list[str]) -> None:
+        current = self.model_var.get().strip()
+        self.model_box.configure(values=models, state="readonly")
+        self.model_var.set(current if current in models else models[0])
+        self.refresh_models_button.state(["!disabled"])
+        self.model_help.configure(text=f"Found {len(models)} model(s). Choose one from the list.")
+        self.status_var.set(f"Retrieved {len(models)} model(s) from vLLM.")
+
+    def _models_failed(self, message: str) -> None:
+        self.model_box.configure(state="normal")
+        self.refresh_models_button.state(["!disabled"])
+        self.model_help.configure(text="Could not retrieve models. Check the URL/key or enter the model ID manually.")
+        self.status_var.set("Model discovery failed.")
+        messagebox.showerror("Could not retrieve vLLM models", message, parent=self.root)
 
     def choose_output_dir(self) -> None:
         path = filedialog.askdirectory(parent=self.root, initialdir=self.output_var.get() or ".")
@@ -629,7 +830,8 @@ class SurveyCoderApp:
                 "context": settings["context"],
                 "streams": settings["streams"],
                 "llm": {"provider": settings["provider"], "model": settings["model"],
-                        "base_url": settings["base_url"] or None},
+                        "base_url": settings["base_url"] or None,
+                        "max_output_tokens": settings["max_output_tokens"]},
             }
             Path(path).write_text(json.dumps(config, indent=2), encoding="utf-8")
             self._append_log(f"Saved configuration to {path}")
@@ -650,12 +852,20 @@ class SurveyCoderApp:
             provider = llm.get("provider", "openai")
             if provider not in ("openai", "google", "vllm"):
                 raise ValueError("Provider must be openai, google, or vllm.")
-            endpoint = llm.get("base_url", "") or os.environ.get("VLLM_BASE_URL", "")
+            endpoint = llm.get("base_url", "")
+            if provider == "vllm" and not endpoint:
+                endpoint = os.environ.get("VLLM_BASE_URL", "")
             if provider == "vllm" and not endpoint:
                 raise ValueError("A vLLM configuration needs llm.base_url or VLLM_BASE_URL.")
             self.provider_var.set(provider)
             self.model_var.set(llm.get("model", "gpt-4o-mini"))
             self.base_var.set(endpoint)
+            max_output_tokens = llm.get("max_output_tokens")
+            if provider == "vllm" and "max_output_tokens" not in llm:
+                max_output_tokens = 32768
+            self.max_output_tokens_var.set(
+                "" if max_output_tokens is None else str(max_output_tokens))
+            self._last_provider = provider
             self.provider_changed()
             rows = {str(stream.get("column")): stream for stream in streams}
             for column, (include, question, prefix) in self.stream_rows.items():

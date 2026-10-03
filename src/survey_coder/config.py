@@ -26,6 +26,11 @@ def load_config(path: str | None) -> Dict[str, Any]:
         raise ValueError("Config 'llm' must be an object")
     if llm.get("provider") not in (None, "openai", "google", "vllm"):
         raise ValueError("Config llm.provider must be 'openai', 'google', or 'vllm'")
+    max_output_tokens = llm.get("max_output_tokens")
+    if max_output_tokens is not None and (
+            not isinstance(max_output_tokens, int) or isinstance(max_output_tokens, bool)
+            or max_output_tokens < 1):
+        raise ValueError("Config llm.max_output_tokens must be a positive integer")
     return config
 
 

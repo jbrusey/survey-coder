@@ -35,6 +35,8 @@ def parse_args():
     parser.add_argument("--model", default=None, help="LLM model name")
     parser.add_argument("--provider", default=None, choices=["openai", "google", "vllm"], help="LLM provider")
     parser.add_argument("--openai-base-url", default=None, help="Base URL for OpenAI-compatible API (e.g., http://localhost:11434/v1 for Ollama)")
+    parser.add_argument("--max-output-tokens", type=int, default=None,
+                        help="Maximum output tokens per request (default: provider/server default)")
     parser.add_argument("--batch-size", type=int, default=100, help="Number of comments per batch")
     parser.add_argument("--sample-size", type=int, default=1000, help="Max comments to sample per stream")
     parser.add_argument("--random-seed", type=int, default=42, help="Random seed for reproducibility")
@@ -100,7 +102,9 @@ def sample_comments(df: pd.DataFrame, sample_size: int, seed: int) -> pd.DataFra
 def make_batches(records: List[Dict], batch_size: int) -> List[List[Dict]]:
     return [records[i:i + batch_size] for i in range(0, len(records), batch_size)]
 
-def call_llm(prompt: str, system_prompt: str, model: str, temperature: float, base_url: Optional[str] = None, provider: str = "openai") -> str:
+def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
+             base_url: Optional[str] = None, provider: str = "openai",
+             max_tokens: Optional[int] = None) -> str:
     if provider == "google":
         api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
@@ -110,10 +114,11 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float, ba
         combined_prompt = f"{system_prompt}\n\n{prompt}"
         
         gemini_model = genai.GenerativeModel(model)
-        generation_config = genai.GenerationConfig(
-            temperature=temperature,
-            response_mime_type="application/json"
-        )
+        generation_options = {"temperature": temperature,
+                              "response_mime_type": "application/json"}
+        if max_tokens is not None:
+            generation_options["max_output_tokens"] = max_tokens
+        generation_config = genai.GenerationConfig(**generation_options)
         
         response = gemini_model.generate_content(
             combined_prompt,
@@ -139,15 +144,20 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float, ba
                         {"role": "user", "content": prompt}
                     ],
                     "temperature": temperature,
-                    "max_tokens": 2048,
                 }
+                if max_tokens is not None:
+                    kwargs["max_tokens"] = max_tokens
                 if base_url and model.startswith("Qwen/"):
                     kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
                 if not base_url or "ollama" in base_url.lower():
                     kwargs["response_format"] = {"type": "json_object"}
                 
                 response = client.chat.completions.create(**kwargs)
-                return response.choices[0].message.content
+                choice = response.choices[0]
+                if choice.finish_reason == "length":
+                    limit = f"{max_tokens}-token " if max_tokens is not None else "server "
+                    raise ValueError(f"Model output was truncated at the {limit}output limit.")
+                return choice.message.content
             except Exception as e:
                 logger.warning(f"LLM call failed (attempt {attempt+1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
@@ -234,7 +244,9 @@ def process_stream(stream: Dict, df: pd.DataFrame, args: argparse.Namespace, id_
         sys_p, user_p = build_batch_prompt(stream, batch, args.max_themes_per_batch, id_col, context, prompts)
         
         try:
-            response_text = call_llm(user_p, sys_p, args.model, args.temperature, args.openai_base_url, args.provider)
+            response_text = call_llm(
+                user_p, sys_p, args.model, args.temperature,
+                args.openai_base_url, args.provider, args.max_output_tokens)
             batch_data = parse_json_response(response_text)
             
             batch_data['metadata'] = {
@@ -264,8 +276,16 @@ def process_stream(stream: Dict, df: pd.DataFrame, args: argparse.Namespace, id_
     sys_p_con, user_p_con = build_consolidation_prompt(stream, all_batch_themes, args.max_final_codes, context, {"system": prompts["consolidate_system"], "batch": prompts["consolidate"]})
     
     try:
-        con_response_text = call_llm(user_p_con, sys_p_con, args.model, args.temperature, args.openai_base_url, args.provider)
+        con_response_text = call_llm(
+            user_p_con, sys_p_con, args.model, args.temperature,
+            args.openai_base_url, args.provider, args.max_output_tokens)
         final_codebook = parse_json_response(con_response_text)
+        if "error" in final_codebook:
+            raise ValueError("Consolidation response was not valid JSON; it may have been truncated.")
+        if (not final_codebook.get("codebook_name") or
+                not final_codebook.get("stream") or
+                not isinstance(final_codebook.get("codes"), list)):
+            raise ValueError("Consolidation response is missing codebook_name, stream, or codes.")
         
         md_path = os.path.join(args.output_dir, f"{stream_name.lower()}_codebook.md")
         save_markdown_codebook(md_path, final_codebook)
@@ -283,6 +303,10 @@ def main():
     args.provider = args.provider or llm.get("provider", "openai")
     args.model = args.model or llm.get("model", "gpt-4o-mini")
     args.openai_base_url = args.openai_base_url or llm.get("base_url")
+    if args.max_output_tokens is None:
+        args.max_output_tokens = llm.get("max_output_tokens")
+    if args.max_output_tokens is not None and args.max_output_tokens < 1:
+        raise ValueError("max_output_tokens must be a positive integer")
     if args.provider == "vllm" and not args.openai_base_url:
         logger.error("vLLM requires a base URL (set llm.base_url in config or pass --openai-base-url).")
         sys.exit(1)

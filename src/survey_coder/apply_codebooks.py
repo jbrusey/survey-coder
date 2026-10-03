@@ -36,6 +36,8 @@ def parse_args():
     parser.add_argument("--model", default=None, help="LLM model name")
     parser.add_argument("--provider", default=None, choices=["openai", "google", "vllm"], help="LLM provider")
     parser.add_argument("--openai-base-url", default=None, help="Base URL for OpenAI-compatible API")
+    parser.add_argument("--max-output-tokens", type=int, default=None,
+                        help="Maximum output tokens per request (default: provider/server default)")
     parser.add_argument("--batch-size", type=int, default=5, help="Number of comments per coding batch")
     parser.add_argument("--temperature", type=float, default=0.0, help="LLM temperature (0.0 for deterministic coding)")
     parser.add_argument("--max-rows", type=int, default=None, help="Limit number of rows to process (for testing)")
@@ -51,7 +53,9 @@ def extract_codes_from_md(md_path: str) -> List[str]:
     codes = re.findall(r'^##\s+(?:\d+\.\s+)?(.+)$', content, re.MULTILINE)
     return [c.strip() for c in codes]
 
-def call_llm(prompt: str, system_prompt: str, model: str, temperature: float, base_url: Optional[str] = None, provider: str = "openai") -> str:
+def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
+             base_url: Optional[str] = None, provider: str = "openai",
+             max_tokens: Optional[int] = None) -> str:
     if provider == "google":
         api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
@@ -61,10 +65,11 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float, ba
         combined_prompt = f"{system_prompt}\n\n{prompt}"
         
         gemini_model = genai.GenerativeModel(model)
-        generation_config = genai.GenerationConfig(
-            temperature=temperature,
-            response_mime_type="application/json"
-        )
+        generation_options = {"temperature": temperature,
+                              "response_mime_type": "application/json"}
+        if max_tokens is not None:
+            generation_options["max_output_tokens"] = max_tokens
+        generation_config = genai.GenerationConfig(**generation_options)
         
         response = gemini_model.generate_content(
             combined_prompt,
@@ -87,15 +92,20 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float, ba
                 {"role": "user", "content": prompt}
             ],
             "temperature": temperature,
-            "max_tokens": 1024,
         }
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
         if base_url and model.startswith("Qwen/"):
             kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
         if not base_url or "ollama" in base_url.lower():
             kwargs["response_format"] = {"type": "json_object"}
         
         response = client.chat.completions.create(**kwargs)
-        return response.choices[0].message.content
+        choice = response.choices[0]
+        if choice.finish_reason == "length":
+            limit = f"{max_tokens}-token " if max_tokens is not None else "server "
+            raise ValueError(f"Model output was truncated at the {limit}output limit.")
+        return choice.message.content
 
 def parse_json_response(response_text: str) -> Dict:
     try:
@@ -137,7 +147,9 @@ def process_stream(df: pd.DataFrame, stream: Dict, id_col: str, args: argparse.N
         sys_p, user_p = build_coding_prompt(stream, context, codebook_md, batch, id_col, prompts)
         
         try:
-            response_text = call_llm(user_p, sys_p, args.model, args.temperature, args.openai_base_url, args.provider)
+            response_text = call_llm(
+                user_p, sys_p, args.model, args.temperature,
+                args.openai_base_url, args.provider, args.max_output_tokens)
             batch_results = parse_json_response(response_text)
             
             if "results" in batch_results:
@@ -163,6 +175,10 @@ def main():
     args.provider = args.provider or llm.get("provider", "openai")
     args.model = args.model or llm.get("model", "gpt-4o-mini")
     args.openai_base_url = args.openai_base_url or llm.get("base_url")
+    if args.max_output_tokens is None:
+        args.max_output_tokens = llm.get("max_output_tokens")
+    if args.max_output_tokens is not None and args.max_output_tokens < 1:
+        raise ValueError("max_output_tokens must be a positive integer")
     if args.provider == "vllm" and not args.openai_base_url:
         raise ValueError("vLLM requires a base URL (set llm.base_url in config or pass --openai-base-url).")
     
