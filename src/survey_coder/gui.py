@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import traceback
@@ -38,9 +39,56 @@ def build_streams(columns: list[str], question: str) -> list[dict[str, str]]:
     ]
 
 
+WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
+def safe_codebook_filename(column: str) -> str:
+    stem = re.sub(r"[^\w.-]+", "_", str(column)).strip(" ._-")[:80] or "responses"
+    if stem.upper() in WINDOWS_RESERVED_NAMES:
+        stem += "_responses"
+    return f"{stem}_codebook.md"
+
+
+def default_codebook_filenames(columns: list[str]) -> list[str]:
+    names = []
+    used = set()
+    for column in columns:
+        path = Path(safe_codebook_filename(column))
+        candidate = path.name
+        number = 2
+        while candidate.casefold() in used:
+            stem = path.stem.removesuffix("_codebook")
+            candidate = f"{stem}_{number}_codebook{path.suffix}"
+            number += 1
+        used.add(candidate.casefold())
+        names.append(candidate)
+    return names
+
+
 def codebook_path(stream: dict, output_dir: str | Path) -> Path:
-    return Path(stream.get("codebook") or
-                Path(output_dir) / f"{stream['name'].lower()}_codebook.md")
+    configured = stream.get("codebook")
+    if not configured:
+        return Path(output_dir) / safe_codebook_filename(stream["name"])
+    path = Path(configured).expanduser()
+    return path if path.is_absolute() or path.parent != Path(".") else Path(output_dir) / path
+
+
+def validate_codebook_paths(streams: list[dict], output_dir: str | Path) -> None:
+    invalid = re.compile(r'[<>:"|?*\\\x00-\x1f]')
+    seen = set()
+    for stream in streams:
+        path = codebook_path(stream, output_dir)
+        name = path.name
+        if (path.suffix.casefold() != ".md" or invalid.search(name)
+                or name.endswith((" ", ".")) or path.stem.upper() in WINDOWS_RESERVED_NAMES):
+            raise ValueError(f"Codebook for “{stream['column']}” needs a safe .md filename.")
+        key = str(path.absolute()).casefold()
+        if key in seen:
+            raise ValueError(f"Each selected column needs a unique codebook path: {path}")
+        seen.add(key)
 
 
 def codebook_ready(path: Path) -> bool:
@@ -204,8 +252,7 @@ class SurveyCoderApp:
         self.status_var = tk.StringVar(value="Choose a data file to begin.")
         self.progress_var = tk.DoubleVar(value=0)
         self.df: pd.DataFrame | None = None
-        self.stream_rows: dict[str, tuple[tk.BooleanVar, tk.StringVar, tk.StringVar]] = {}
-        self.codebook_paths: dict[str, str] = {}
+        self.stream_rows: dict[str, tuple[tk.BooleanVar, tk.StringVar, tk.StringVar, tk.StringVar]] = {}
         self.busy = False
         self.stage = "generate"
         self.preferences_path = self._preferences_path()
@@ -348,8 +395,12 @@ class SurveyCoderApp:
         self.data_summary.pack(anchor="w", pady=(8, 0))
 
         mapping = self._section(page, "2. Choose columns and describe each question")
-        ttk.Label(mapping, text="Each response column becomes its own codebook. Add the question wording for each one.",
-                  foreground="#555555", wraplength=680).grid(row=0, column=0, sticky="w", pady=(0, 10))
+        ttk.Label(
+            mapping,
+            text=("Each selected response column uses one Markdown codebook. "
+                  "Codebook file controls that file; result prefix names coded-result columns."),
+            foreground="#555555", wraplength=760,
+        ).grid(row=0, column=0, sticky="w", pady=(0, 10))
         mapping.grid(row=1, column=0, sticky="nsew")
         mapping.columnconfigure(0, weight=1)
         mapping.rowconfigure(2, weight=1)
@@ -607,15 +658,16 @@ class SurveyCoderApp:
         for child in self.mapping_inner.winfo_children():
             child.destroy()
         self.stream_rows.clear()
-        self.codebook_paths.clear()
-        headers = ("Analyse", "Response column", "Question wording", "Output prefix")
-        widths = (9, 23, 38, 16)
+        headers = ("Analyse", "Response column", "Question wording", "Codebook file", "Result prefix")
+        widths = (7, 18, 28, 24, 13)
         for col, (text, width) in enumerate(zip(headers, widths)):
             label = ttk.Label(self.mapping_inner, text=text, width=width, font=("TkDefaultFont", 10, "bold"))
             label.grid(row=0, column=col, sticky="w", padx=(0, 6), pady=(0, 7))
-        for row, column in enumerate(columns, start=1):
+        filenames = default_codebook_filenames([str(column) for column in columns])
+        for row, (column, filename) in enumerate(zip(columns, filenames), start=1):
             include = tk.BooleanVar(value=False)
             question = tk.StringVar()
+            codebook = tk.StringVar(value=filename)
             prefix = tk.StringVar(value=str(column))
             cb = ttk.Checkbutton(self.mapping_inner, variable=include, command=self.update_selected_count)
             cb.grid(row=row, column=0, sticky="w", padx=(0, 6), pady=3)
@@ -623,36 +675,41 @@ class SurveyCoderApp:
                       wraplength=180).grid(row=row, column=1, sticky="w", padx=(0, 6), pady=3)
             question_entry = ttk.Entry(self.mapping_inner, textvariable=question)
             question_entry.grid(row=row, column=2, sticky="ew", padx=(0, 6), pady=3)
-            ttk.Entry(self.mapping_inner, textvariable=prefix, width=16).grid(
-                row=row, column=3, sticky="ew", pady=3)
+            ttk.Entry(self.mapping_inner, textvariable=codebook, width=24).grid(
+                row=row, column=3, sticky="ew", padx=(0, 6), pady=3)
+            ttk.Entry(self.mapping_inner, textvariable=prefix, width=13).grid(
+                row=row, column=4, sticky="ew", pady=3)
             include.trace_add("write", lambda *_: self.update_selected_count())
-            self.stream_rows[str(column)] = (include, question, prefix)
+            self.stream_rows[str(column)] = (include, question, codebook, prefix)
         self.mapping_inner.columnconfigure(2, weight=1)
         self.update_selected_count()
 
     def select_all(self, selected: bool) -> None:
-        for include, _question, _prefix in self.stream_rows.values():
+        for include, _question, _codebook, _prefix in self.stream_rows.values():
             include.set(selected)
 
     def update_selected_count(self) -> None:
         if hasattr(self, "selected_count"):
-            count = sum(include.get() for include, _question, _prefix in self.stream_rows.values())
+            count = sum(include.get() for include, _question, _codebook, _prefix
+                        in self.stream_rows.values())
             self.selected_count.configure(text=f"{count} column{'s' if count != 1 else ''} selected")
         if hasattr(self, "apply_button"):
             self._update_workflow_actions()
 
     def settings_from_ui(self, validate_data: bool = False) -> dict:
         streams = []
-        for column, (include, question, prefix) in self.stream_rows.items():
+        for column, (include, question, codebook, prefix) in self.stream_rows.items():
             if include.get():
                 if not question.get().strip():
                     raise ValueError(f"Add the survey question for column “{column}”.")
-                stream = {"name": column, "column": column,
-                          "question": question.get().strip(),
-                          "prefix": prefix.get().strip() or column}
-                if column in self.codebook_paths:
-                    stream["codebook"] = self.codebook_paths[column]
-                streams.append(stream)
+                if not codebook.get().strip():
+                    raise ValueError(f"Choose a codebook file for column “{column}”.")
+                streams.append({
+                    "name": column, "column": column,
+                    "question": question.get().strip(),
+                    "codebook": codebook.get().strip(),
+                    "prefix": prefix.get().strip() or column,
+                })
         if not self.input_var.get() or not streams:
             raise ValueError("Choose a data file and select at least one response column.")
         if validate_data and not Path(self.input_var.get()).is_file():
@@ -669,6 +726,7 @@ class SurveyCoderApp:
         }
         if not settings["model"] or not settings["output_dir"]:
             raise ValueError("Enter a model name and output folder.")
+        validate_codebook_paths(streams, settings["output_dir"])
         if settings["provider"] == "vllm" and not settings["base_url"]:
             raise ValueError("Enter a vLLM API URL or set VLLM_BASE_URL.")
         if settings["batch_size"] < 1 or settings["sample_size"] < 1 or settings["min_length"] < 0:
@@ -1040,15 +1098,12 @@ class SurveyCoderApp:
             rows = {str(stream.get("column")): stream for stream in streams}
             unavailable = sorted(set(rows) - set(self.stream_rows))
             available = set(rows) & set(self.stream_rows)
-            self.codebook_paths = {
-                column: stream["codebook"] for column, stream in rows.items()
-                if column in available and stream.get("codebook")
-            }
-            for column, (include, question, prefix) in self.stream_rows.items():
+            for column, (include, question, codebook, prefix) in self.stream_rows.items():
                 stream = rows.get(column)
                 include.set(stream is not None)
                 if stream is not None:
                     question.set(stream.get("question", ""))
+                    codebook.set(stream.get("codebook", safe_codebook_filename(column)))
                     prefix.set(stream.get("prefix", stream.get("name", column)))
             self.update_selected_count()
             self.refresh_summary()

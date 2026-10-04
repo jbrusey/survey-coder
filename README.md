@@ -39,6 +39,8 @@ A portable Tkinter GUI is included for Windows, macOS, and Linux. It selects CSV
 uv run survey-coder-gui
 ```
 
+Choose each response column’s Markdown codebook file and result-column prefix on the first step. Bare codebook filenames are stored in the output folder; full or relative paths can point to existing handcrafted codebooks. The GUI rejects unsafe or duplicate filenames.
+
 Choose **OpenAI**, **Google**, or **vLLM** on the model step. The GUI automatically remembers the last provider, model, endpoint, and output-token limit as local model preferences. For vLLM, enter an OpenAI-compatible `/v1` endpoint, or set `VLLM_BASE_URL` before launching the GUI, then choose **Refresh models** to retrieve model IDs from the server. If discovery fails, you can still type a model ID manually. Set `VLLM_API_KEY` in the environment for an authenticated endpoint.
 
 **Save analysis setup** stores the model settings, context, stream mappings, output and prompt folders, and processing settings. To restore one, select the matching data file, then choose **Load analysis setup** beside the column mappings. Loading applies the saved values and reports mappings unavailable in the selected data. Data-file paths and API keys are deliberately excluded; keys are always read from the environment.
@@ -91,7 +93,7 @@ The config contains a `streams` list and can optionally hold reusable LLM defaul
     "base_url": "https://your-vllm-host.example/v1"
   },
   "streams": [
-    {"name": "Teaching", "column": "TeachingComment", "question": "What did you think of the teaching?", "prefix": "Teaching"}
+    {"name": "Teaching", "column": "TeachingComment", "question": "What did you think of the teaching?", "codebook": "outputs/teaching_codebook.md", "prefix": "Teaching"}
   ]
 }
 ```

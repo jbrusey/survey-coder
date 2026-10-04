@@ -3,7 +3,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from survey_coder.gui import SurveyCoderApp, analysis_config, codebook_ready
+from survey_coder.gui import (
+    SurveyCoderApp,
+    analysis_config,
+    codebook_path,
+    codebook_ready,
+    default_codebook_filenames,
+    validate_codebook_paths,
+)
 
 
 class FakeButton:
@@ -57,6 +64,30 @@ class AnalysisSetupTests(unittest.TestCase):
         self.assertNotIn("input", setup)
         self.assertNotIn("api_key", str(setup))
         self.assertNotIn("secret", str(setup))
+
+
+class CodebookMappingTests(unittest.TestCase):
+    def test_default_filenames_are_safe_and_unique(self):
+        names = default_codebook_filenames(["Question / answer", "question \\ answer", "CON"])
+
+        self.assertEqual(len({name.casefold() for name in names}), 3)
+        self.assertTrue(all(name.endswith("_codebook.md") for name in names))
+        self.assertFalse(any("/" in name or "\\" in name for name in names))
+
+    def test_bare_codebook_filename_uses_output_directory(self):
+        self.assertEqual(
+            codebook_path({"name": "Comments", "codebook": "comments.md"}, "results"),
+            Path("results/comments.md"),
+        )
+
+    def test_duplicate_codebook_paths_are_rejected_case_insensitively(self):
+        streams = [
+            {"column": "One", "name": "One", "codebook": "shared.md"},
+            {"column": "Two", "name": "Two", "codebook": "SHARED.md"},
+        ]
+
+        with self.assertRaisesRegex(ValueError, "unique codebook path"):
+            validate_codebook_paths(streams, "results")
 
 
 class WorkflowActionTests(unittest.TestCase):

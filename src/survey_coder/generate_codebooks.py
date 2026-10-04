@@ -337,7 +337,8 @@ def main():
         prompts = {name: load_prompt(args.prompt_dir, name) for name in ("discover_system.txt", "discover_batch.txt", "consolidate_system.txt", "consolidate.txt")}
         prompts = {"system": prompts["discover_system.txt"], "batch": prompts["discover_batch.txt"], **prompts}
         for stream in streams:
-            destination = os.path.join(args.output_dir, f"{stream['name'].lower()}_codebook.md")
+            destination = stream.get("codebook") or os.path.join(
+                args.output_dir, f"{stream['name'].lower()}_codebook.md")
             replace = args.overwrite and os.path.exists(destination)
             if os.path.exists(destination) and not replace:
                 logger.warning(f"Skipping existing codebook: {destination} (use --overwrite to replace)")
