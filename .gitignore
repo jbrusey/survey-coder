@@ -5,6 +5,9 @@
 .venv/
 __pycache__/
 *.py[cod]
+build/
+dist/
+*.spec.bak
 
 # Local survey data and generated analysis
 *.csv

@@ -13,7 +13,11 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "scikit-learn>=1.8.0",
     "tqdm>=4.67.3",
+    "truststore>=0.10.4",
 ]
+
+[project.optional-dependencies]
+packaging = ["pyinstaller>=6.11,<7"]
 
 [project.scripts]
 generate-codebooks = "survey_coder.generate_codebooks:main"

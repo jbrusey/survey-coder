@@ -1,0 +1,28 @@
+name: Build Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+      - name: Build application and installer
+        shell: powershell
+        run: .\packaging\windows\build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: survey-coder-windows
+          path: dist/installer/*.exe
+          if-no-files-found: error

@@ -6,9 +6,12 @@ from unittest.mock import Mock
 from survey_coder.gui import (
     SurveyCoderApp,
     analysis_config,
+    api_key_environment_name,
     codebook_path,
     codebook_ready,
+    default_output_directory,
     default_codebook_filenames,
+    resource_path,
     validate_codebook_paths,
 )
 
@@ -64,6 +67,26 @@ class AnalysisSetupTests(unittest.TestCase):
         self.assertNotIn("input", setup)
         self.assertNotIn("api_key", str(setup))
         self.assertNotIn("secret", str(setup))
+
+    def test_desktop_defaults_are_absolute_user_paths(self):
+        self.assertTrue(default_output_directory().is_absolute())
+        self.assertEqual(resource_path("prompts").name, "prompts")
+
+    def test_provider_uses_the_expected_environment_key(self):
+        self.assertEqual(api_key_environment_name("openai"), "OPENAI_API_KEY")
+        self.assertEqual(api_key_environment_name("google"), "GOOGLE_API_KEY")
+        self.assertEqual(api_key_environment_name("vllm"), "VLLM_API_KEY")
+        self.assertEqual(api_key_environment_name("openwebui"), "OPENWEBUI_API_KEY")
+
+    def test_bundled_prompt_path_is_not_saved_as_a_machine_specific_path(self):
+        settings = {
+            "context": "feedback", "streams": [], "provider": "openai",
+            "model": "model", "base_url": "", "max_output_tokens": None,
+            "output_dir": "results", "prompt_dir": str(resource_path("prompts")),
+            "batch_size": 5, "sample_size": 10, "min_length": 1, "temperature": 0,
+        }
+
+        self.assertNotIn("prompt_dir", analysis_config(settings)["analysis"])
 
 
 class CodebookMappingTests(unittest.TestCase):

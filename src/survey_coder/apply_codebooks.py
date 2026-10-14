@@ -12,7 +12,9 @@ from tqdm import tqdm
 import google.generativeai as genai
 from dotenv import load_dotenv
 from .data import load_data
-from .config import load_config, load_prompt
+from .provider_responses import extract_completion
+from .config import (PROVIDERS, api_key_environment_name, base_url_environment_name,
+                     load_config, load_prompt)
 
 # Load environment variables from home directory then local directory
 load_dotenv(os.path.expanduser("~/.env"))
@@ -34,7 +36,7 @@ def parse_args():
     parser.add_argument("--output", required=True, help="Path to save final coded .csv")
     parser.add_argument("--id-column", default=None, help="Name of the ID column (optional)")
     parser.add_argument("--model", default=None, help="LLM model name")
-    parser.add_argument("--provider", default=None, choices=["openai", "google", "vllm"], help="LLM provider")
+    parser.add_argument("--provider", default=None, choices=PROVIDERS, help="LLM provider")
     parser.add_argument("--openai-base-url", default=None, help="Base URL for OpenAI-compatible API")
     parser.add_argument("--max-output-tokens", type=int, default=None,
                         help="Maximum output tokens per request (default: provider/server default)")
@@ -77,7 +79,7 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
         )
         return response.text
     else:
-        api_key = os.environ.get("VLLM_API_KEY") if base_url else os.environ.get("OPENAI_API_KEY")
+        api_key = os.environ.get(api_key_environment_name(provider))
         client = OpenAI(
             api_key=api_key or "dummy-key",
             base_url=base_url,
@@ -101,11 +103,11 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
             kwargs["response_format"] = {"type": "json_object"}
         
         response = client.chat.completions.create(**kwargs)
-        choice = response.choices[0]
-        if choice.finish_reason == "length":
+        response_text, finish_reason = extract_completion(response)
+        if finish_reason == "length":
             limit = f"{max_tokens}-token " if max_tokens is not None else "server "
             raise ValueError(f"Model output was truncated at the {limit}output limit.")
-        return choice.message.content
+        return response_text
 
 def parse_json_response(response_text: str) -> Dict:
     try:
@@ -174,13 +176,15 @@ def main():
     llm = config.get("llm", {})
     args.provider = args.provider or llm.get("provider", "openai")
     args.model = args.model or llm.get("model", "gpt-4o-mini")
-    args.openai_base_url = args.openai_base_url or llm.get("base_url")
+    base_url_env = base_url_environment_name(args.provider)
+    args.openai_base_url = (args.openai_base_url or llm.get("base_url")
+                            or (os.environ.get(base_url_env) if base_url_env else None))
     if args.max_output_tokens is None:
         args.max_output_tokens = llm.get("max_output_tokens")
     if args.max_output_tokens is not None and args.max_output_tokens < 1:
         raise ValueError("max_output_tokens must be a positive integer")
-    if args.provider == "vllm" and not args.openai_base_url:
-        raise ValueError("vLLM requires a base URL (set llm.base_url in config or pass --openai-base-url).")
+    if args.provider in ("vllm", "openwebui") and not args.openai_base_url:
+        raise ValueError(f"{args.provider} requires a base URL (set llm.base_url or pass --openai-base-url).")
     
     df = load_data(args.input)
     

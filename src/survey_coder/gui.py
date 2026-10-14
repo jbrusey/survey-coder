@@ -19,7 +19,8 @@ import tkinter as tk
 import pandas as pd
 
 from .apply_codebooks import extract_codes_from_md, process_stream as apply_stream
-from .config import load_prompt
+from .config import (PROVIDERS, api_key_environment_name, base_url_environment_name,
+                     load_model_options, load_prompt)
 from .generate_codebooks import (
     ensure_id_column,
     extract_stream,
@@ -28,6 +29,21 @@ from .generate_codebooks import (
     sample_comments,
     validate_columns,
 )
+
+
+def resource_path(*parts: str) -> Path:
+    """Return a resource path in a source checkout or a frozen application."""
+    if getattr(sys, "frozen", False):
+        root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        root = Path(__file__).resolve().parents[2]
+    return root.joinpath(*parts)
+
+
+def default_output_directory() -> Path:
+    """Use a predictable, user-owned location for generated files."""
+    documents = Path.home() / "Documents"
+    return (documents if documents.is_dir() else Path.home()) / "Survey Coder Results"
 
 
 def build_streams(columns: list[str], question: str) -> list[dict[str, str]]:
@@ -100,6 +116,17 @@ def codebook_ready(path: Path) -> bool:
 
 def analysis_config(settings: dict) -> dict:
     """Return a portable analysis setup. Data paths and credentials stay local."""
+    analysis = {
+        "output_dir": settings["output_dir"],
+        "batch_size": settings["batch_size"],
+        "sample_size": settings["sample_size"],
+        "min_length": settings["min_length"],
+        "temperature": settings["temperature"],
+    }
+    # Do not persist the machine-specific location of prompts bundled with the app.
+    prompt_dir = Path(settings["prompt_dir"]).expanduser()
+    if prompt_dir.resolve() != resource_path("prompts").resolve():
+        analysis["prompt_dir"] = settings["prompt_dir"]
     return {
         "context": settings["context"],
         "streams": settings["streams"],
@@ -109,14 +136,7 @@ def analysis_config(settings: dict) -> dict:
             "base_url": settings["base_url"] or None,
             "max_output_tokens": settings["max_output_tokens"],
         },
-        "analysis": {
-            "output_dir": settings["output_dir"],
-            "prompt_dir": settings["prompt_dir"],
-            "batch_size": settings["batch_size"],
-            "sample_size": settings["sample_size"],
-            "min_length": settings["min_length"],
-            "temperature": settings["temperature"],
-        },
+        "analysis": analysis,
     }
 
 
@@ -241,14 +261,16 @@ class SurveyCoderApp:
         self.context_var = tk.StringVar(value="student survey feedback")
         self.provider_var = tk.StringVar(value="openai")
         self.model_var = tk.StringVar(value="gpt-4o-mini")
-        self.output_var = tk.StringVar(value="outputs")
-        self.prompt_var = tk.StringVar(value="prompts")
+        self.output_var = tk.StringVar(value=str(default_output_directory()))
+        self.prompt_var = tk.StringVar(value=str(resource_path("prompts")))
         self.base_var = tk.StringVar()
         self.batch_var = tk.StringVar(value="5")
         self.sample_var = tk.StringVar(value="1000")
         self.min_var = tk.StringVar(value="5")
         self.temp_var = tk.StringVar(value="0.0")
         self.max_output_tokens_var = tk.StringVar(value="")
+        models_config = os.environ.get("SURVEY_CODER_MODELS_CONFIG")
+        self.model_options = load_model_options(models_config or resource_path("models.json"))
         self.status_var = tk.StringVar(value="Choose a data file to begin.")
         self.progress_var = tk.DoubleVar(value=0)
         self.df: pd.DataFrame | None = None
@@ -259,6 +281,7 @@ class SurveyCoderApp:
         self.preferences_after: str | None = None
         self._load_llm_preferences()
         self._last_provider = self.provider_var.get()
+        self._updating_api_key = False
 
         self._build()
         for variable in (self.provider_var, self.model_var, self.base_var,
@@ -282,12 +305,13 @@ class SurveyCoderApp:
         try:
             preferences = json.loads(self.preferences_path.read_text(encoding="utf-8"))
             provider = preferences.get("provider", "openai")
-            if provider not in ("openai", "google", "vllm"):
+            if provider not in PROVIDERS:
                 return
             self.provider_var.set(provider)
             self.model_var.set(preferences.get("model", "gpt-4o-mini"))
+            base_url_env = base_url_environment_name(provider)
             self.base_var.set(preferences.get("base_url") or
-                              (os.environ.get("VLLM_BASE_URL", "") if provider == "vllm" else ""))
+                              (os.environ.get(base_url_env, "") if base_url_env else ""))
             max_output_tokens = preferences.get("max_output_tokens")
             if provider == "vllm" and "max_output_tokens" not in preferences:
                 max_output_tokens = 32768
@@ -443,7 +467,7 @@ class SurveyCoderApp:
             model.columnconfigure(col, weight=1)
         ttk.Label(model, text="Provider").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=5)
         provider = ttk.Combobox(model, textvariable=self.provider_var,
-                                values=("openai", "google", "vllm"), state="readonly", width=22)
+                                values=PROVIDERS, state="readonly", width=22)
         provider.grid(row=1, column=1, sticky="ew", pady=5)
         provider.bind("<<ComboboxSelected>>", self.provider_changed)
         ttk.Label(model, text="Model name").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=5)
@@ -468,6 +492,9 @@ class SurveyCoderApp:
         ttk.Label(model, text="vLLM default: 32,768. Adjust to your server’s limit.",
                   foreground="#555555", wraplength=360).grid(
             row=4, column=2, columnspan=2, sticky="w", padx=(18, 0), pady=(8, 3))
+        ttk.Label(model, text="API keys are loaded from your .env file.",
+                  foreground="#555555").grid(row=5, column=0, columnspan=4,
+                                               sticky="w", pady=(8, 3))
 
         output = self._section(page, "Output")
         output.grid(row=2, column=0, sticky="ew", pady=(0, 12))
@@ -726,9 +753,17 @@ class SurveyCoderApp:
         }
         if not settings["model"] or not settings["output_dir"]:
             raise ValueError("Enter a model name and output folder.")
+        if not Path(settings["prompt_dir"]).is_dir():
+            raise ValueError("The prompt folder could not be found. Choose a valid prompt folder.")
         validate_codebook_paths(streams, settings["output_dir"])
-        if settings["provider"] == "vllm" and not settings["base_url"]:
-            raise ValueError("Enter a vLLM API URL or set VLLM_BASE_URL.")
+        if settings["provider"] in ("vllm", "openwebui") and not settings["base_url"]:
+            env_name = base_url_environment_name(settings["provider"])
+            raise ValueError(f"Enter a {settings['provider']} API URL or set {env_name}.")
+        if settings["provider"] == "google" and not os.environ.get("GOOGLE_API_KEY"):
+            raise ValueError("Set GOOGLE_API_KEY in your .env file or environment.")
+        if (settings["provider"] == "openai" and not settings["base_url"]
+                and not os.environ.get("OPENAI_API_KEY")):
+            raise ValueError("Set OPENAI_API_KEY in your .env file or environment.")
         if settings["batch_size"] < 1 or settings["sample_size"] < 1 or settings["min_length"] < 0:
             raise ValueError("Batch size and sample size must be positive; minimum text length cannot be negative.")
         if settings["max_output_tokens"] is not None and settings["max_output_tokens"] < 1:
@@ -945,14 +980,23 @@ class SurveyCoderApp:
             if not self.max_output_tokens_var.get().strip():
                 self.max_output_tokens_var.set("32768")
         self._last_provider = provider
-        needs_endpoint = provider in ("openai", "vllm")
-        self.base_label.configure(text="vLLM API URL" if provider == "vllm" else "Compatible API URL")
-        if provider == "vllm" and not self.base_var.get().strip():
-            self.base_var.set(os.environ.get("VLLM_BASE_URL", ""))
+        display_name = {"google": "Google", "vllm": "vLLM",
+                        "openwebui": "OpenWebUI"}.get(provider, "OpenAI")
+        model_choices = self.model_options.get(provider, [])
+        self.model_box.configure(values=model_choices)
+        if model_choices and self.model_var.get() not in model_choices and provider not in ("vllm", "openwebui"):
+            self.model_var.set(model_choices[0])
+        local_provider = provider in ("vllm", "openwebui")
+        needs_endpoint = provider in ("openai", "vllm", "openwebui")
+        self.base_label.configure(text=(f"{display_name} API URL" if local_provider
+                                        else "Compatible API URL"))
+        base_url_env = base_url_environment_name(provider)
+        if base_url_env and not self.base_var.get().strip():
+            self.base_var.set(os.environ.get(base_url_env, ""))
         state = "normal" if needs_endpoint else "disabled"
         self.base_entry.configure(state=state)
-        self.base_label.configure(foreground="#222222" if needs_endpoint else "#888888")
-        if provider == "vllm":
+        self.base_label.state(["!disabled"] if needs_endpoint else ["disabled"])
+        if local_provider:
             if self.model_var.get() == "gpt-4o-mini":
                 self.model_var.set("")
             self.refresh_models_button.state(["!disabled"])
@@ -964,22 +1008,24 @@ class SurveyCoderApp:
             self.model_help.configure(text="Used to frame what the comments are about.")
 
     def refresh_vllm_models(self) -> None:
-        if self.provider_var.get() != "vllm":
+        provider = self.provider_var.get()
+        if provider not in ("vllm", "openwebui"):
             return
+        display_name = "vLLM" if provider == "vllm" else "OpenWebUI"
         endpoint = self.base_var.get().strip().rstrip("/")
         parsed = urlparse(endpoint)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             messagebox.showerror(
-                "Invalid vLLM URL",
-                "Enter a full server URL, for example http://localhost:8000/v1.",
+                f"Invalid {display_name} URL",
+                "Enter a full API URL, for example http://localhost:3000/api.",
                 parent=self.root,
             )
             return
         models_url = endpoint if parsed.path.endswith("/models") else f"{endpoint}/models"
         self.refresh_models_button.state(["disabled"])
-        self.model_help.configure(text="Querying the vLLM server…")
-        self.status_var.set("Retrieving available models from vLLM…")
-        api_key = os.environ.get("VLLM_API_KEY")
+        self.model_help.configure(text=f"Querying the {display_name} server…")
+        self.status_var.set(f"Retrieving available models from {display_name}…")
+        api_key = os.environ.get(api_key_environment_name(provider))
 
         def fetch() -> None:
             try:
@@ -1006,14 +1052,14 @@ class SurveyCoderApp:
         self.model_var.set(current if current in models else models[0])
         self.refresh_models_button.state(["!disabled"])
         self.model_help.configure(text=f"Found {len(models)} model(s). Choose one from the list.")
-        self.status_var.set(f"Retrieved {len(models)} model(s) from vLLM.")
+        self.status_var.set(f"Retrieved {len(models)} model(s).")
 
     def _models_failed(self, message: str) -> None:
         self.model_box.configure(state="normal")
         self.refresh_models_button.state(["!disabled"])
         self.model_help.configure(text="Could not retrieve models. Check the URL/key or enter the model ID manually.")
         self.status_var.set("Model discovery failed.")
-        messagebox.showerror("Could not retrieve vLLM models", message, parent=self.root)
+        messagebox.showerror("Could not retrieve models", message, parent=self.root)
 
     def choose_output_dir(self) -> None:
         path = filedialog.askdirectory(parent=self.root, initialdir=self.output_var.get() or ".")
@@ -1070,13 +1116,14 @@ class SurveyCoderApp:
             if not isinstance(llm, dict) or not isinstance(analysis, dict):
                 raise ValueError("The llm and analysis settings must be JSON objects.")
             provider = llm.get("provider", "openai")
-            if provider not in ("openai", "google", "vllm"):
-                raise ValueError("Provider must be openai, google, or vllm.")
+            if provider not in PROVIDERS:
+                raise ValueError("Provider must be openai, google, vllm, or openwebui.")
             endpoint = llm.get("base_url", "")
-            if provider == "vllm" and not endpoint:
-                endpoint = os.environ.get("VLLM_BASE_URL", "")
-            if provider == "vllm" and not endpoint:
-                raise ValueError("A vLLM configuration needs llm.base_url or VLLM_BASE_URL.")
+            base_url_env = base_url_environment_name(provider)
+            if base_url_env and not endpoint:
+                endpoint = os.environ.get(base_url_env, "")
+            if provider in ("vllm", "openwebui") and not endpoint:
+                raise ValueError(f"A {provider} configuration needs llm.base_url or {base_url_env}.")
             self.provider_var.set(provider)
             self.model_var.set(llm.get("model", "gpt-4o-mini"))
             self.base_var.set(endpoint)

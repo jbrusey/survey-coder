@@ -39,18 +39,43 @@ A portable Tkinter GUI is included for Windows, macOS, and Linux. It selects CSV
 uv run survey-coder-gui
 ```
 
+The GUI defaults to `Documents\Survey Coder Results` on Windows. Provider API
+keys are loaded from `.env` and are never written to analysis setup files.
+
+#### Windows installer
+
+End users do not need Python, `uv`, or a terminal. Build the application on a
+Windows x64 machine with [uv](https://docs.astral.sh/uv/) and
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) installed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
+```
+
+The script creates a portable application in `dist\Survey Coder` and, when
+Inno Setup is available, a per-user installer in `dist\installer`. The
+installer creates a Start Menu shortcut and offers an optional Desktop
+shortcut; it does not require administrator rights.
+
+PyInstaller builds are platform-specific, so the Windows installer must be
+built on Windows rather than macOS or Linux. For wider distribution, sign the
+generated executable and installer with your organisation's code-signing
+certificate to reduce Microsoft SmartScreen warnings.
+
 Choose each response column’s Markdown codebook file and result-column prefix on the first step. Bare codebook filenames are stored in the output folder; full or relative paths can point to existing handcrafted codebooks. The GUI rejects unsafe or duplicate filenames.
 
-Choose **OpenAI**, **Google**, or **vLLM** on the model step. The GUI automatically remembers the last provider, model, endpoint, and output-token limit as local model preferences. For vLLM, enter an OpenAI-compatible `/v1` endpoint, or set `VLLM_BASE_URL` before launching the GUI, then choose **Refresh models** to retrieve model IDs from the server. If discovery fails, you can still type a model ID manually. Set `VLLM_API_KEY` in the environment for an authenticated endpoint.
+Choose **OpenAI**, **Google**, **vLLM**, or **OpenWebUI** on the model step. The GUI automatically remembers the last provider, model, endpoint, and output-token limit as local model preferences. Model choices for OpenAI and Google are listed in the root `models.json`; edit that file or point `SURVEY_CODER_MODELS_CONFIG` at another JSON file to customize them. For vLLM, enter its OpenAI-compatible `/v1` endpoint. For OpenWebUI, enter its `/api` endpoint (for example, `http://localhost:3000/api`). You can also set `VLLM_BASE_URL` or `OPENWEBUI_BASE_URL` before launching the GUI. Choose **Refresh models** to retrieve model IDs from either server; if discovery fails, type a model ID manually.
 
 **Save analysis setup** stores the model settings, context, stream mappings, output and prompt folders, and processing settings. To restore one, select the matching data file, then choose **Load analysis setup** beside the column mappings. Loading applies the saved values and reports mappings unavailable in the selected data. Data-file paths and API keys are deliberately excluded; keys are always read from the environment.
 
 ### 3. API Keys
-Create a `.env` file in your **home directory** (`~/.env`) or the **project root** (`./.env`) with your keys:
+Create a `.env` file in your **home directory** (`~/.env`) or the **project root** (`./.env`) with your keys. The application loads these with `python-dotenv`; environment variables already set in your shell take precedence.
 ```text
 OPENAI_API_KEY=your_key_here
 GOOGLE_API_KEY=your_key_here
 VLLM_API_KEY=your_vllm_key_here
+OPENWEBUI_API_KEY=your_openwebui_key_here
+OPENWEBUI_BASE_URL=http://localhost:3000/api
 ```
 *Note: If using Ollama, no key is required.*
 
@@ -97,7 +122,7 @@ The config contains a `streams` list and can optionally hold reusable LLM defaul
   ]
 }
 ```
-Supported provider values are `openai`, `google`, and `vllm`. The GUI’s editable max-output-token field defaults to `32768` when vLLM is selected; other providers leave it blank. CLI flags such as `--provider`, `--model`, `--openai-base-url`, and `--max-output-tokens` override the corresponding config defaults. Set optional `llm.max_output_tokens` to a positive integer to configure an explicit limit, or omit it in CLI/config use to let the provider/server choose. The GUI saves this setting with the endpoint. vLLM uses the OpenAI-compatible endpoint and `VLLM_API_KEY` environment variable when authentication is enabled.
+Supported provider values are `openai`, `google`, `vllm`, and `openwebui`. The GUI’s editable max-output-token field defaults to `32768` when vLLM is selected; other providers leave it blank. CLI flags such as `--provider`, `--model`, `--openai-base-url`, and `--max-output-tokens` override the corresponding config defaults. Set optional `llm.max_output_tokens` to a positive integer to configure an explicit limit, or omit it to let the provider/server choose. OpenWebUI uses an `/api` base URL supplied in config, with `--openai-base-url`, or through `OPENWEBUI_BASE_URL`; set `OPENWEBUI_API_KEY` when the server requires authentication.
 **Output:** one codebook per configured stream.
 
 ### Phase 1.5: Human Refinement (Optional)
@@ -159,6 +184,7 @@ Toggle providers using the `--provider` and `--model` flags:
 - **Gemini:** `--provider google --model gemini-2.0-flash`
 - **Ollama:** `--provider openai --model gemma4:latest --openai-base-url http://localhost:11434/v1`
 - **vLLM:** `--provider vllm --model Qwen/Qwen3.5-9B --openai-base-url "$VLLM_BASE_URL"`
+- **OpenWebUI:** `--provider openwebui --model your-model-id --openai-base-url "$OPENWEBUI_BASE_URL"`
 
 ---
 
