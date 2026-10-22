@@ -4,6 +4,7 @@ import json
 import time
 import logging
 import argparse
+import re
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
@@ -265,7 +266,8 @@ def process_stream(stream: Dict, df: pd.DataFrame, args: argparse.Namespace, id_
                 "num_comments": len(batch)
             }
             
-            batch_filename = f"{stream_name.lower()}_batch_{batch_num:03d}.json"
+            safe_stream_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", stream_name.lower())
+            batch_filename = f"{safe_stream_name}_batch_{batch_num:03d}.json"
             with open(os.path.join(batch_out_dir, batch_filename), 'w') as f:
                 json.dump(batch_data, f, indent=2)
             
