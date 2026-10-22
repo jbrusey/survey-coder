@@ -174,6 +174,14 @@ uv run apply-codebooks --input "feedback.xlsx" --config benchmark_config.json \
 
 ### Tests
 
+Use `uv run` to run tests in the project's managed environment:
+
+```bash
+uv run pytest
+```
+
+Or run the standard-library test runner:
+
 ```bash
 uv run python -m unittest discover -s tests
 ```
