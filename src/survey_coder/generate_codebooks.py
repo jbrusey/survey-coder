@@ -134,7 +134,7 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
         client = OpenAI(
             api_key=api_key or "dummy-key-for-local-llm",
             base_url=base_url,
-            timeout=120 if base_url else 600,
+            timeout=600,
             max_retries=0 if base_url else 2,
         )
         
@@ -340,8 +340,12 @@ def main():
         streams = config["streams"]
         validate_columns(df, streams)
         df, id_col = ensure_id_column(df, args.id_column)
-        prompts = {name: load_prompt(args.prompt_dir, name) for name in ("discover_system.txt", "discover_batch.txt", "consolidate_system.txt", "consolidate.txt")}
-        prompts = {"system": prompts["discover_system.txt"], "batch": prompts["discover_batch.txt"], **prompts}
+        prompts = {
+            "system": load_prompt(args.prompt_dir, "discover_system.txt"),
+            "batch": load_prompt(args.prompt_dir, "discover_batch.txt"),
+            "consolidate_system": load_prompt(args.prompt_dir, "consolidate_system.txt"),
+            "consolidate": load_prompt(args.prompt_dir, "consolidate.txt"),
+        }
         for stream in streams:
             destination = stream.get("codebook") or os.path.join(
                 args.output_dir, f"{stream['name'].lower()}_codebook.md")

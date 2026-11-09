@@ -23,7 +23,7 @@ class GenerateCodebooksTests(unittest.TestCase):
 
         self.assertEqual(response, '{"themes": []}')
         openai.assert_called_once_with(api_key="secret", base_url="http://localhost:3000/api",
-                                       timeout=120, max_retries=0)
+                                       timeout=600, max_retries=0)
 
     @patch("survey_coder.generate_codebooks.OpenAI")
     def test_openwebui_allows_servers_without_authentication(self, openai):

@@ -83,7 +83,7 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
         client = OpenAI(
             api_key=api_key or "dummy-key",
             base_url=base_url,
-            timeout=120 if base_url else 600,
+            timeout=600,
             max_retries=0 if base_url else 2,
         )
         
