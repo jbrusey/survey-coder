@@ -142,6 +142,8 @@ uv run apply-codebooks \
 ```
 **Output:** `final_results.csv` with one-hot encoded columns for every code (e.g., `Pos_Clear_Explanation`).
 
+For troubleshooting, pass `--diagnostic-log diagnostics.jsonl` to append each batch's prompts, response, and any error as JSONL. These logs can contain survey comments and model output, so store and share them with the same care as the source data.
+
 ### Phase 3: Evaluation
 Compare the LLM results against manual coding to check for reliability.
 ```bash

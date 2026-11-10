@@ -43,6 +43,7 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=5, help="Number of comments per coding batch")
     parser.add_argument("--temperature", type=float, default=0.0, help="LLM temperature (0.0 for deterministic coding)")
     parser.add_argument("--max-rows", type=int, default=None, help="Limit number of rows to process (for testing)")
+    parser.add_argument("--diagnostic-log", help="Append prompts, responses, and errors as JSONL (contains survey comments)")
     return parser.parse_args()
 
 def extract_codes_from_md(md_path: str) -> List[str]:
@@ -146,13 +147,17 @@ def process_stream(df: pd.DataFrame, stream: Dict, id_col: str, args: argparse.N
     
     logger.info(f"Coding {len(rows_to_process)} {stream_name} comments in {len(batches)} batches.")
     
-    for batch in tqdm(batches, desc=f"Coding {stream_name}"):
+    for batch_number, batch in enumerate(tqdm(batches, desc=f"Coding {stream_name}"), start=1):
         sys_p, user_p = build_coding_prompt(stream, context, codebook_md, batch, id_col, prompts)
-        
+        diagnostic = {"stream": stream_name, "batch": batch_number,
+                      "messages": [{"role": "system", "content": sys_p},
+                                   {"role": "user", "content": user_p}]}
         try:
             response_text = call_llm(
                 user_p, sys_p, args.model, args.temperature,
                 args.openai_base_url, args.provider, args.max_output_tokens)
+            if args.diagnostic_log:
+                diagnostic["response"] = response_text
             batch_results = parse_json_response(response_text)
             
             if "results" in batch_results:
@@ -166,7 +171,13 @@ def process_stream(df: pd.DataFrame, stream: Dict, id_col: str, args: argparse.N
                 logger.warning(f"Batch response missing 'results' key: {batch_results}")
         except Exception as e:
             logger.error(f"Failed to process batch: {e}")
+            if args.diagnostic_log:
+                diagnostic["error"] = repr(e)
             continue
+        finally:
+            if args.diagnostic_log:
+                with open(args.diagnostic_log, "a", encoding="utf-8") as log:
+                    log.write(json.dumps(diagnostic, ensure_ascii=False) + "\n")
             
     return results_map, valid_codes
 

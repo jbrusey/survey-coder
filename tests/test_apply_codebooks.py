@@ -1,7 +1,13 @@
+import json
+import tempfile
 import unittest
+from argparse import Namespace
+from pathlib import Path
 from unittest.mock import Mock, patch
 
-from survey_coder.apply_codebooks import call_llm
+import pandas as pd
+
+from survey_coder.apply_codebooks import call_llm, process_stream
 
 
 class ApplyCodebooksProviderTests(unittest.TestCase):
@@ -13,6 +19,36 @@ class ApplyCodebooksProviderTests(unittest.TestCase):
                             "http://localhost:3000/api", "openwebui")
 
         self.assertEqual(response, '{"results": []}')
+
+
+class DiagnosticLogTests(unittest.TestCase):
+    @patch("survey_coder.apply_codebooks.call_llm", return_value='{"results": []}')
+    def test_process_stream_appends_prompt_and_response_as_jsonl(self, call_llm_mock):
+        with tempfile.TemporaryDirectory() as directory:
+            codebook_path = Path(directory) / "codebook.md"
+            codebook_path.write_text("## Helpful", encoding="utf-8")
+            log_path = Path(directory) / "diagnostics.jsonl"
+            args = Namespace(
+                max_rows=None, batch_size=1, model="test", temperature=0,
+                openai_base_url=None, provider="openai", max_output_tokens=None,
+                diagnostic_log=str(log_path),
+            )
+            prompts = {"system": "Code {stream_name}", "batch": "{comments}"}
+            frame = pd.DataFrame([{"ID": "R1", "Comment": "A useful comment"}])
+
+            process_stream(
+                frame,
+                {"name": "Feedback", "codebook": str(codebook_path), "column": "Comment"},
+                "ID", args, "survey feedback", prompts,
+            )
+
+            entry = json.loads(log_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(entry["stream"], "Feedback")
+        self.assertEqual(entry["batch"], 1)
+        self.assertIn("A useful comment", entry["messages"][1]["content"])
+        self.assertEqual(entry["response"], '{"results": []}')
+        call_llm_mock.assert_called_once()
 
     @patch("survey_coder.apply_codebooks.OpenAI")
     def test_openwebui_reports_unexpected_response_shape(self, openai):
