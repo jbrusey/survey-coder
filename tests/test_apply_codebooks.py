@@ -119,6 +119,38 @@ class CodeColumnTests(unittest.TestCase):
 
         self.assertEqual(coded.shape[1], len(codes) + 2)
 
+
+class UnknownCodeWarningTests(unittest.TestCase):
+    @patch("survey_coder.apply_codebooks.call_llm", return_value=(
+            '{"results": [{"id": "R1", "codes": ["Helpful", "Unclear / vague", '
+            '"Unclear / vague"]}]}'))
+    def test_warns_with_stream_ids_and_counts_while_retaining_valid_codes(self, _call_llm):
+        with tempfile.TemporaryDirectory() as directory:
+            codebook_path = Path(directory) / "codebook.md"
+            codebook_path.write_text("## Helpful\n## Unclear_vague\n", encoding="utf-8")
+            args = Namespace(
+                max_rows=None, batch_size=1, model="test", temperature=0,
+                openai_base_url=None, provider="openai", max_output_tokens=None,
+                think=None, json_mode=True, diagnostic_log=None,
+            )
+            frame = pd.DataFrame([{"ID": "R1", "Comment": "A useful comment"}])
+            prompts = {"system": "Code {stream_name}", "batch": "{comments}"}
+
+            with self.assertLogs("survey_coder.apply_codebooks", level="WARNING") as logs:
+                results, codes = process_stream(
+                    frame, {"name": "Feedback", "codebook": str(codebook_path),
+                            "column": "Comment"},
+                    "ID", args, "survey feedback", prompts,
+                )
+
+        self.assertEqual(codes, ["Helpful", "Unclear_vague"])
+        self.assertEqual(results, {"R1": ["Helpful"]})
+        warning = "\n".join(logs.output)
+        self.assertIn("Feedback", warning)
+        self.assertIn("R1", warning)
+        self.assertIn("Unclear / vague", warning)
+        self.assertIn("(2)", warning)
+
     @patch("survey_coder.apply_codebooks.OpenAI")
     def test_openwebui_reports_unexpected_response_shape(self, openai):
         openai.return_value.chat.completions.create.return_value = ["unexpected"]

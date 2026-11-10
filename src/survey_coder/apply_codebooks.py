@@ -5,6 +5,7 @@ import time
 import logging
 import argparse
 import re
+from collections import Counter, defaultdict
 import pandas as pd
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
@@ -147,6 +148,7 @@ def process_stream(df: pd.DataFrame, stream: Dict, id_col: str, args: argparse.N
     
     for batch_number, batch in enumerate(tqdm(batches, desc=f"Coding {stream_name}"), start=1):
         sys_p, user_p = build_coding_prompt(stream, context, codebook_md, batch, id_col, prompts)
+        rejected_by_id = defaultdict(Counter)
         diagnostic = {"stream": stream_name, "batch": batch_number,
                       "messages": [{"role": "system", "content": sys_p},
                                    {"role": "user", "content": user_p}]}
@@ -162,12 +164,24 @@ def process_stream(df: pd.DataFrame, stream: Dict, id_col: str, args: argparse.N
             if "results" in batch_results:
                 for res in batch_results["results"]:
                     # Basic validation: ensure codes are in the codebook
-                    clean_codes = [c for c in res.get("codes", []) if c in valid_codes]
+                    response_codes = res.get("codes", [])
+                    clean_codes = [code for code in response_codes if code in valid_codes]
+                    unknown_codes = [code for code in response_codes if code not in valid_codes]
+                    for code in unknown_codes:
+                        rejected_by_id[str(res["id"])][code] += 1
                     # If empty but the LLM tried to say something, maybe it missed the exact name? 
                     # For now, we stay strict.
                     results_map[str(res["id"])] = clean_codes
             else:
                 logger.warning(f"Batch response missing 'results' key: {batch_results}")
+            if rejected_by_id:
+                details = "; ".join(
+                    f"{response_id}: " + ", ".join(
+                        f"{code!r} ({count})" for code, count in counts.items())
+                    for response_id, counts in rejected_by_id.items())
+                logger.warning(
+                    "Stream %r rejected unknown code names for response IDs: %s",
+                    stream_name, details)
         except Exception as e:
             logger.error(f"Failed to process batch: {e}")
             if args.diagnostic_log:
