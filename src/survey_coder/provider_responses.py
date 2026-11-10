@@ -23,7 +23,7 @@ def _content_text(content: Any) -> str:
     raise TypeError(f"Expected response content to be text, got {type(content).__name__}")
 
 
-def extract_completion(response: Any) -> Tuple[str, Optional[str]]:
+def extract_completion(response: Any, provider: str = "OpenAI-compatible") -> Tuple[str, Optional[str]]:
     """Return completion text and finish reason across SDK and server shapes.
 
     Some OpenWebUI versions/adapters return the completion body directly as a
@@ -35,8 +35,9 @@ def extract_completion(response: Any) -> Tuple[str, Optional[str]]:
     choices = _get(response, "choices")
     if not isinstance(choices, (list, tuple)) or not choices:
         raise TypeError(
-            "Expected an OpenAI-compatible response string or a response with "
-            f"a non-empty choices list, got {type(response).__name__}"
+            f"{provider} returned an unsupported response shape: expected a response "
+            "string or a response with a non-empty choices list, "
+            f"got {type(response).__name__}"
         )
 
     choice = choices[0]
@@ -46,6 +47,6 @@ def extract_completion(response: Any) -> Tuple[str, Optional[str]]:
         # Some compatible APIs expose text completions instead of chat messages.
         content = _get(choice, "text")
     if content is None:
-        raise TypeError("The first response choice contains neither message content nor text")
+        raise TypeError(f"{provider} response choice contains neither message content nor text")
     finish_reason = _get(choice, "finish_reason")
     return _content_text(content), finish_reason

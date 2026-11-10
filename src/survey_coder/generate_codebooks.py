@@ -157,7 +157,8 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
                     kwargs["response_format"] = {"type": "json_object"}
                 
                 response = client.chat.completions.create(**kwargs)
-                response_text, finish_reason = extract_completion(response)
+                response_text, finish_reason = extract_completion(
+                    response, "OpenWebUI" if provider == "openwebui" else "OpenAI-compatible provider")
                 if finish_reason == "length":
                     limit = f"{max_tokens}-token " if max_tokens is not None else "server "
                     raise ValueError(f"Model output was truncated at the {limit}output limit.")

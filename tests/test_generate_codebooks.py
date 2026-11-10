@@ -54,6 +54,14 @@ class GenerateCodebooksTests(unittest.TestCase):
 
         self.assertEqual(response, '{"themes": []}')
 
+    @patch("survey_coder.generate_codebooks.OpenAI")
+    def test_openwebui_rejects_unexpected_response_with_provider_diagnostic(self, openai):
+        openai.return_value.chat.completions.create.return_value = {"message": "unexpected"}
+
+        with self.assertRaisesRegex(TypeError, "OpenWebUI returned an unsupported response shape"):
+            call_llm("prompt", "system", "model", 0,
+                     "http://localhost:3000/api", "openwebui")
+
     def test_save_codebook_preserves_existing_file_unless_replacement_is_explicit(self):
         codebook = {"codebook_name": "Draft", "stream": "Comments", "codes": []}
         with tempfile.TemporaryDirectory() as directory:
