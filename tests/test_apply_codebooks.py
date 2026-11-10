@@ -11,6 +11,21 @@ from survey_coder.apply_codebooks import call_llm, process_stream
 
 
 class ApplyCodebooksProviderTests(unittest.TestCase):
+    @patch("survey_coder.apply_codebooks.genai.Client")
+    def test_google_provider_uses_supported_genai_client(self, client_class):
+        client_class.return_value.models.generate_content.return_value.text = '{"results": []}'
+        with patch.dict("os.environ", {"GOOGLE_API_KEY": "secret"}):
+            response = call_llm("prompt", "system", "gemini-model", 0.2,
+                                provider="google", max_tokens=123)
+
+        self.assertEqual(response, '{"results": []}')
+        client_class.assert_called_once_with(api_key="secret")
+        request = client_class.return_value.models.generate_content.call_args.kwargs
+        self.assertEqual(request["model"], "gemini-model")
+        self.assertEqual(request["contents"], "system\n\nprompt")
+        self.assertEqual(request["config"].response_mime_type, "application/json")
+        self.assertEqual(request["config"].max_output_tokens, 123)
+
     @patch("survey_coder.apply_codebooks.OpenAI")
     def test_openwebui_accepts_completion_text_returned_directly(self, openai):
         openai.return_value.chat.completions.create.return_value = '{"results": []}'

@@ -7,6 +7,21 @@ from survey_coder.generate_codebooks import call_llm, clean_comment, parse_json_
 
 
 class GenerateCodebooksTests(unittest.TestCase):
+    @patch("survey_coder.generate_codebooks.genai.Client")
+    def test_google_provider_uses_supported_genai_client(self, client_class):
+        client_class.return_value.models.generate_content.return_value.text = '{"themes": []}'
+        with patch.dict("os.environ", {"GOOGLE_API_KEY": "secret"}):
+            response = call_llm("prompt", "system", "gemini-model", 0.2,
+                                provider="google", max_tokens=123)
+
+        self.assertEqual(response, '{"themes": []}')
+        client_class.assert_called_once_with(api_key="secret")
+        request = client_class.return_value.models.generate_content.call_args.kwargs
+        self.assertEqual(request["model"], "gemini-model")
+        self.assertEqual(request["contents"], "system\n\nprompt")
+        self.assertEqual(request["config"].response_mime_type, "application/json")
+        self.assertEqual(request["config"].max_output_tokens, 123)
+
     def test_clean_comment_rejects_placeholders(self):
         self.assertIsNone(clean_comment("N/A", 3))
         self.assertEqual(clean_comment("Useful feedback", 3), "Useful feedback")

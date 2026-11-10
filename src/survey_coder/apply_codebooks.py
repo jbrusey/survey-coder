@@ -9,7 +9,8 @@ import pandas as pd
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
 from tqdm import tqdm
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 from .data import load_data
 from .provider_responses import extract_completion
@@ -63,20 +64,16 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
         api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
             raise ValueError("GOOGLE_API_KEY environment variable not set.")
-        genai.configure(api_key=api_key)
-        
         combined_prompt = f"{system_prompt}\n\n{prompt}"
-        
-        gemini_model = genai.GenerativeModel(model)
         generation_options = {"temperature": temperature,
                               "response_mime_type": "application/json"}
         if max_tokens is not None:
             generation_options["max_output_tokens"] = max_tokens
-        generation_config = genai.GenerationConfig(**generation_options)
-        
-        response = gemini_model.generate_content(
-            combined_prompt,
-            generation_config=generation_config
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=model,
+            contents=combined_prompt,
+            config=types.GenerateContentConfig(**generation_options),
         )
         return response.text
     else:
