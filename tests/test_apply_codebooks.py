@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 
-from survey_coder.apply_codebooks import call_llm, process_stream
+from survey_coder.apply_codebooks import add_code_columns, call_llm, process_stream
 
 
 class ApplyCodebooksProviderTests(unittest.TestCase):
@@ -86,6 +86,38 @@ class DiagnosticLogTests(unittest.TestCase):
         self.assertIn("A useful comment", entry["messages"][1]["content"])
         self.assertEqual(entry["response"], '{"results": []}')
         call_llm_mock.assert_called_once()
+
+
+class CodeColumnTests(unittest.TestCase):
+    def test_code_columns_keep_names_values_and_stream_order(self):
+        frame = pd.DataFrame({"ID": ["R1", "R2"], "Comment": ["one", "two"]})
+        results = [
+            ({"name": "Positive", "prefix": "Pos"},
+             {"R1": ["Helpful", "Clear"], "R2": ["Clear"]}, ["Helpful", "Clear"]),
+            ({"name": "Improvement", "prefix": "Imp"},
+             {"R2": ["Pace"]}, ["Pace"]),
+        ]
+
+        coded = add_code_columns(frame, "ID", results)
+
+        self.assertEqual(list(coded.columns), [
+            "ID", "Comment", "Pos_Helpful", "Pos_Clear", "Pos_Codes_Applied",
+            "Imp_Pace", "Imp_Codes_Applied",
+        ])
+        self.assertEqual(coded[["Pos_Helpful", "Pos_Clear", "Imp_Pace"]].values.tolist(),
+                         [[1, 1, 0], [0, 1, 1]])
+        self.assertEqual(coded["Pos_Codes_Applied"].tolist(), ["Helpful, Clear", "Clear"])
+        self.assertEqual(coded["Imp_Codes_Applied"].tolist(), ["", "Pace"])
+
+    def test_many_code_columns_do_not_emit_fragmentation_warning(self):
+        frame = pd.DataFrame({"ID": ["R1"]})
+        codes = [f"Code_{index}" for index in range(150)]
+        results = [({"name": "Feedback"}, {"R1": codes}, codes)]
+
+        with self.assertNoLogs("pandas", level="WARNING"):
+            coded = add_code_columns(frame, "ID", results)
+
+        self.assertEqual(coded.shape[1], len(codes) + 2)
 
     @patch("survey_coder.apply_codebooks.OpenAI")
     def test_openwebui_reports_unexpected_response_shape(self, openai):

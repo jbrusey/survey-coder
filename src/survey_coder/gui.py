@@ -18,7 +18,7 @@ import tkinter as tk
 
 import pandas as pd
 
-from .apply_codebooks import extract_codes_from_md, process_stream as apply_stream
+from .apply_codebooks import add_code_columns, extract_codes_from_md, process_stream as apply_stream
 from .config import (PROVIDERS, api_key_environment_name, base_url_environment_name,
                      load_model_options, load_prompt)
 from .generate_codebooks import (
@@ -233,13 +233,7 @@ def run_pipeline(settings: dict, operation: str) -> str:
             result, codes = apply_stream(df, stream, id_col, args,
                                          settings["context"], prompts)
             results.append((stream, result, codes))
-        for stream, result, codes in results:
-            prefix = stream["prefix"]
-            for code in codes:
-                df[f"{prefix}_{code}"] = df[id_col].apply(
-                    lambda value, code=code: int(code in result.get(str(value), [])))
-            df[f"{prefix}_Codes_Applied"] = df[id_col].apply(
-                lambda value: ", ".join(result.get(str(value), [])))
+        df = add_code_columns(df, id_col, results)
         output = output_dir / "final_coded_results.csv"
         df.to_csv(output, index=False)
         return f"Coded results saved to {output}"

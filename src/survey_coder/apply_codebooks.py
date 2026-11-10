@@ -180,6 +180,20 @@ def process_stream(df: pd.DataFrame, stream: Dict, id_col: str, args: argparse.N
             
     return results_map, valid_codes
 
+
+def add_code_columns(df: pd.DataFrame, id_col: str,
+                     results: List[tuple[Dict, Dict[str, List[str]], List[str]]]) -> pd.DataFrame:
+    """Append all coded output columns together to avoid DataFrame fragmentation."""
+    output_columns = {}
+    response_ids = df[id_col]
+    for stream, result_map, codes in results:
+        prefix = stream.get("prefix", stream["name"])
+        applied_codes = response_ids.map(lambda value: result_map.get(value, []))
+        for code in codes:
+            output_columns[f"{prefix}_{code}"] = applied_codes.map(lambda values, code=code: int(code in values))
+        output_columns[f"{prefix}_Codes_Applied"] = applied_codes.map(lambda values: ", ".join(values))
+    return pd.concat([df, pd.DataFrame(output_columns, index=df.index)], axis=1)
+
 def main():
     args = parse_args()
 
@@ -217,11 +231,7 @@ def main():
         results.append((stream, result, codes))
 
     logger.info("Collating results...")
-    for stream, result_map, codes in results:
-        prefix = stream.get("prefix", stream["name"])
-        for code in codes:
-            df[f"{prefix}_{code}"] = df[id_col].apply(lambda x, c=code: 1 if c in result_map.get(x, []) else 0)
-        df[f"{prefix}_Codes_Applied"] = df[id_col].apply(lambda x: ", ".join(result_map.get(x, [])))
+    df = add_code_columns(df, id_col, results)
     
     df.to_csv(args.output, index=False)
     logger.info(f"Final coded dataset saved to {args.output}")
