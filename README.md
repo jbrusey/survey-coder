@@ -123,6 +123,8 @@ The config contains a `streams` list and can optionally hold reusable LLM defaul
 }
 ```
 Supported provider values are `openai`, `google`, `vllm`, and `openwebui`. The GUI’s editable max-output-token field defaults to `32768` when vLLM is selected; other providers leave it blank. CLI flags such as `--provider`, `--model`, `--openai-base-url`, and `--max-output-tokens` override the corresponding config defaults. Set optional `llm.max_output_tokens` to a positive integer to configure an explicit limit, or omit it to let the provider/server choose. OpenWebUI uses an `/api` base URL supplied in config, with `--openai-base-url`, or through `OPENWEBUI_BASE_URL`; set `OPENWEBUI_API_KEY` when the server requires authentication.
+
+For OpenAI-compatible `apply-codebooks` requests, optional `llm.think` passes a boolean `think` option to the endpoint (for example, set it to `false` for Ollama models that support thinking control). JSON response formatting is enabled by default; set `llm.json_mode` to `false` for endpoints that do not support the OpenAI JSON response format. These settings avoid inferring endpoint capabilities from model names or URL hostnames.
 **Output:** one codebook per configured stream.
 
 ### Phase 1.5: Human Refinement (Optional)

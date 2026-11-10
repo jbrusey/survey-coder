@@ -11,6 +11,28 @@ from survey_coder.apply_codebooks import call_llm, process_stream
 
 
 class ApplyCodebooksProviderTests(unittest.TestCase):
+    @patch("survey_coder.apply_codebooks.OpenAI")
+    def test_openai_compatible_request_uses_configured_thinking_and_json_mode(self, openai):
+        openai.return_value.chat.completions.create.return_value = Mock(
+            choices=[Mock(finish_reason="stop", message=Mock(content='{"results": []}'))])
+
+        call_llm("prompt", "system", "qwen3.8:latest", 0,
+                 "http://localhost:11434/v1", think=False)
+
+        request = openai.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(request["extra_body"], {"think": False})
+        self.assertEqual(request["response_format"], {"type": "json_object"})
+
+    @patch("survey_coder.apply_codebooks.OpenAI")
+    def test_json_mode_can_be_disabled(self, openai):
+        openai.return_value.chat.completions.create.return_value = Mock(
+            choices=[Mock(finish_reason="stop", message=Mock(content='{"results": []}'))])
+
+        call_llm("prompt", "system", "model", 0, json_mode=False)
+
+        request = openai.return_value.chat.completions.create.call_args.kwargs
+        self.assertNotIn("response_format", request)
+
     @patch("survey_coder.apply_codebooks.genai.Client")
     def test_google_provider_uses_supported_genai_client(self, client_class):
         client_class.return_value.models.generate_content.return_value.text = '{"results": []}'
@@ -46,7 +68,7 @@ class DiagnosticLogTests(unittest.TestCase):
             args = Namespace(
                 max_rows=None, batch_size=1, model="test", temperature=0,
                 openai_base_url=None, provider="openai", max_output_tokens=None,
-                diagnostic_log=str(log_path),
+                think=None, json_mode=True, diagnostic_log=str(log_path),
             )
             prompts = {"system": "Code {stream_name}", "batch": "{comments}"}
             frame = pd.DataFrame([{"ID": "R1", "Comment": "A useful comment"}])

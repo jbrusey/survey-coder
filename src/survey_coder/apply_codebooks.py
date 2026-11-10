@@ -59,7 +59,8 @@ def extract_codes_from_md(md_path: str) -> List[str]:
 
 def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
              base_url: Optional[str] = None, provider: str = "openai",
-             max_tokens: Optional[int] = None) -> str:
+             max_tokens: Optional[int] = None, think: Optional[bool] = None,
+             json_mode: bool = True) -> str:
     if provider == "google":
         api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
@@ -95,9 +96,9 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
         }
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
-        if base_url and model.startswith("Qwen/"):
-            kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
-        if not base_url or "ollama" in base_url.lower():
+        if think is not None:
+            kwargs["extra_body"] = {"think": think}
+        if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         
         response = client.chat.completions.create(**kwargs)
@@ -152,7 +153,8 @@ def process_stream(df: pd.DataFrame, stream: Dict, id_col: str, args: argparse.N
         try:
             response_text = call_llm(
                 user_p, sys_p, args.model, args.temperature,
-                args.openai_base_url, args.provider, args.max_output_tokens)
+                args.openai_base_url, args.provider, args.max_output_tokens,
+                args.think, args.json_mode)
             if args.diagnostic_log:
                 diagnostic["response"] = response_text
             batch_results = parse_json_response(response_text)
@@ -190,6 +192,8 @@ def main():
                             or (os.environ.get(base_url_env) if base_url_env else None))
     if args.max_output_tokens is None:
         args.max_output_tokens = llm.get("max_output_tokens")
+    args.think = llm.get("think")
+    args.json_mode = llm.get("json_mode", True)
     if args.max_output_tokens is not None and args.max_output_tokens < 1:
         raise ValueError("max_output_tokens must be a positive integer")
     if args.provider in ("vllm", "openwebui") and not args.openai_base_url:
