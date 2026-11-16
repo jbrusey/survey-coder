@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 from sklearn.metrics import cohen_kappa_score
 
-from survey_coder.auto_research import (eligible_ids, evaluate, has_minimum_coverage,
+from survey_coder.auto_research import (eligible_ids, evaluate, evaluate_detailed, has_minimum_coverage,
                                         main, parse_args,
                                         prediction_coverage, run_candidate,
                                         validate_benchmark_frames)
@@ -64,6 +64,18 @@ def test_evaluate_pools_codes_and_excludes_missing_predictions():
     assert cells == 3
     assert missing == 1
     assert kappa == cohen_kappa_score([1, 0, 0], [1, 0, 0])
+
+
+def test_evaluate_detailed_reports_per_code_support_and_missing_predictions():
+    reference = pd.DataFrame({"UserID": ["1", "2", "3"], "Comment": list("abc"),
+                             "A": [1, None, 0]})
+    coded = pd.DataFrame({"UserID": ["1", "2", "3"], "stream_A": [1, 2, 0]})
+    kappa, cells, missing, per_code = evaluate_detailed(
+        coded, reference, [{"name": "stream"}], {"1", "2", "3"}, "UserID")
+    assert (kappa, cells, missing) == (1.0, 2, 1)
+    assert per_code["stream_A"] == {"kappa": 1.0, "evaluated_cells": 2,
+                                    "missing_predictions": 1, "human_positive": 1,
+                                    "model_positive": 1}
 
 
 def test_evaluate_honors_custom_comment_column():

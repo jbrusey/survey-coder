@@ -121,9 +121,10 @@ def eligible_ids(input_df: pd.DataFrame, reference_df: pd.DataFrame,
     return set(joined.loc[mask & ref_mask, id_column])
 
 
-def evaluate(coded: pd.DataFrame, reference: pd.DataFrame, streams: list[dict[str, Any]],
-             ids: set[str], id_column: str, comment_column: str = "Comment"
-             ) -> tuple[float | None, int, int]:
+def evaluate_detailed(coded: pd.DataFrame, reference: pd.DataFrame, streams: list[dict[str, Any]],
+                      ids: set[str], id_column: str, comment_column: str = "Comment"
+                      ) -> tuple[float | None, int, int, dict[str, dict[str, Any]]]:
+    """Return pooled and per-code metrics; missing predictions are excluded from kappa."""
     coded = coded.copy()
     reference = reference.copy()
     validate_reference_codes(reference, id_column, comment_column)
@@ -135,29 +136,49 @@ def evaluate(coded: pd.DataFrame, reference: pd.DataFrame, streams: list[dict[st
     human_cells: list[int] = []
     model_cells: list[int] = []
     missing = 0
+    per_code = {}
     for stream in streams:
         prefix = stream.get("prefix", stream["name"])
         for column in reference.columns:
             if column in {id_column, comment_column}:
                 continue
             pred_column = f"{prefix}_{column}"
+            true = pd.to_numeric(left[column], errors="coerce").fillna(0).astype(int)
             if pred_column not in left.columns:
                 missing += len(left)
+                per_code[pred_column] = {"kappa": None, "evaluated_cells": 0,
+                                         "missing_predictions": len(left),
+                                         "human_positive": int(true.sum()),
+                                         "model_positive": 0}
                 continue
-            raw_true = left[column]
-            true = pd.to_numeric(raw_true, errors="coerce")
             pred = pd.to_numeric(left[pred_column], errors="coerce")
             # Human blanks mean zero only for eligible respondents.
-            true = true.fillna(0).astype(int)
             valid = pred.isin((0, 1))
-            missing += int((~valid).sum())
-            human_cells.extend(true[valid].tolist())
-            model_cells.extend(pred[valid].astype(int).tolist())
+            missing_count = int((~valid).sum())
+            missing += missing_count
+            code_true = true[valid].tolist()
+            code_pred = pred[valid].astype(int).tolist()
+            human_cells.extend(code_true)
+            model_cells.extend(code_pred)
+            same_labels = code_true and len(set(code_true + code_pred)) == 1
+            code_kappa = cohen_kappa_score(code_true, code_pred) if code_true and not same_labels else None
+            if code_kappa is not None and not math.isfinite(float(code_kappa)):
+                code_kappa = None
+            per_code[pred_column] = {
+                "kappa": float(code_kappa) if code_kappa is not None else None,
+                "evaluated_cells": len(code_true), "missing_predictions": missing_count,
+                "human_positive": int(true.sum()), "model_positive": int(sum(code_pred))}
     all_labels_same = human_cells and len(set(human_cells + model_cells)) == 1
     kappa = cohen_kappa_score(human_cells, model_cells) if human_cells and not all_labels_same else None
     if kappa is not None and not math.isfinite(float(kappa)):
         kappa = None
-    return (float(kappa) if kappa is not None else None, len(human_cells), missing)
+    return (float(kappa) if kappa is not None else None, len(human_cells), missing, per_code)
+
+
+def evaluate(coded: pd.DataFrame, reference: pd.DataFrame, streams: list[dict[str, Any]],
+             ids: set[str], id_column: str, comment_column: str = "Comment"
+             ) -> tuple[float | None, int, int]:
+    return evaluate_detailed(coded, reference, streams, ids, id_column, comment_column)[:3]
 
 
 def run_candidate(args: argparse.Namespace, candidate: dict[str, Any], index: int,
@@ -226,7 +247,7 @@ def run_candidate(args: argparse.Namespace, candidate: dict[str, Any], index: in
                     "reason": "coding process failed"}
         coded = read_frame(str(coded_path))
         streams = candidate_config["streams"]
-        train_kappa, train_cells, train_missing = evaluate(
+        train_kappa, train_cells, train_missing, per_code = evaluate_detailed(
             coded, reference, streams, train_ids, args.id_column, args.comment_column)
         # A candidate is selected using training rows only. Holdout evaluation is
         # deliberately run only once, below, after selection.
@@ -235,7 +256,7 @@ def run_candidate(args: argparse.Namespace, candidate: dict[str, Any], index: in
                   "seconds": round(elapsed, 2), "kappa": train_kappa,
                   "evaluated_cells": train_cells, "missing_predictions": train_missing,
                   "prediction_coverage": round(prediction_coverage(train_cells, train_missing), 4),
-                  "target_kappa": args.target_kappa, "config": str(config_path),
+                  "per_code": per_code, "target_kappa": args.target_kappa, "config": str(config_path),
                   "coded_output": str(coded_path)}
         (out / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         return result
@@ -338,9 +359,10 @@ def main() -> None:
     (final_dir / "stderr.log").write_text(proc.stderr, encoding="utf-8")
     final_kappa = None
     if proc.returncode == 0 and coded_holdout_path.exists():
-        final_kappa, cells, missing = evaluate(read_frame(str(coded_holdout_path)), reference,
-                                                json.loads(best_config.read_text())["streams"],
-                                                holdout_ids, args.id_column, args.comment_column)
+        final_kappa, cells, missing, per_code = evaluate_detailed(
+            read_frame(str(coded_holdout_path)), reference,
+            json.loads(best_config.read_text())["streams"], holdout_ids,
+            args.id_column, args.comment_column)
     else:
         cells, missing = 0, len(holdout_ids)
     outcome = {"success": final_kappa is not None and final_kappa >= args.target_kappa
@@ -350,7 +372,8 @@ def main() -> None:
                "development_best_kappa": best["kappa"], "development_candidate": best["candidate"],
                "holdout_rows": len(holdout_ids), "evaluated_cells": cells,
                "missing_predictions": missing,
-               "prediction_coverage": round(prediction_coverage(cells, missing), 4)}
+               "prediction_coverage": round(prediction_coverage(cells, missing), 4),
+               "per_code": per_code if proc.returncode == 0 and coded_holdout_path.exists() else {}}
     (out / "final_result.json").write_text(json.dumps(outcome, indent=2), encoding="utf-8")
     print(json.dumps({k: outcome[k] for k in ("success", "seconds", "kappa")}), flush=True)
 
