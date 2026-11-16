@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import logging
+import math
 import argparse
 import re
 from collections import Counter, defaultdict
@@ -226,6 +227,8 @@ def main():
                             or (os.environ.get(base_url_env) if base_url_env else None))
     if args.temperature is None:
         args.temperature = llm.get("temperature", 0.0)
+    if not math.isfinite(args.temperature) or args.temperature < 0:
+        raise ValueError("temperature must be finite and nonnegative")
     if args.max_output_tokens is None:
         args.max_output_tokens = llm.get("max_output_tokens")
     args.think = llm.get("think")
