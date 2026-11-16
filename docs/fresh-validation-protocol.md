@@ -11,7 +11,7 @@ For each question, provide a newly sampled, representative set of at least 400 c
 - Human coding completed independently of model predictions. Keep the holdout labels inaccessible to candidate authors until final scoring.
 - A documented sampling frame, date, inclusion/exclusion rules, and coder/adjudication process.
 
-Exclude comments/IDs from both consumed benchmark partitions. Shuffle the fresh sample before splitting; use the first 200 IDs as development and the remaining rows as a sealed holdout. Exclude blank/D/A/N/A comments consistently.
+Exclude comments/IDs from both consumed benchmark partitions. Shuffle the fresh sample with a recorded random seed; use the first 200 IDs as development and the remaining rows as a sealed holdout. Preserve both ID lists and exclude blank/D/A/N/A comments consistently.
 
 ## Run and record
 
