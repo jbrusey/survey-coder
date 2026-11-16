@@ -31,6 +31,15 @@ def test_goal_check_accepts_exact_kappa_and_coverage_thresholds(tmp_path):
     assert "SCORE: 60" in checked.stdout
 
 
+def test_goal_check_rejects_malformed_json(tmp_path):
+    write_final_result(tmp_path, "question_1", 100, 0)
+    write_final_result(tmp_path, "question_2", 100, 0)
+    path = tmp_path / "outputs/staff_pulse/auto_research/question_1/final_result.json"
+    path.write_text("{not valid json")
+    checked = subprocess.run([str(CHECK)], cwd=tmp_path, capture_output=True, text=True)
+    assert checked.returncode == 1
+
+
 def test_goal_check_rejects_malformed_counts(tmp_path):
     write_final_result(tmp_path, "question_1", 100, 0)
     write_final_result(tmp_path, "question_2", 100, 0)
