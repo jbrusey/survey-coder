@@ -288,6 +288,9 @@ def main() -> None:
         except Exception as exc:
             result = {"candidate": index, "success": False, "seconds": 0, "kappa": None,
                       "reason": f"{type(exc).__name__}: {exc}"}
+        candidate_dir = out / f"candidate_{index:03d}"
+        candidate_dir.mkdir(parents=True, exist_ok=True)
+        (candidate_dir / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         results.append(result)
         with summary_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({k: result.get(k) for k in (

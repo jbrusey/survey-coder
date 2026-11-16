@@ -403,6 +403,8 @@ def test_candidate_setup_failure_does_not_abort_remaining_candidates(tmp_path):
     assert run_candidate.call_count == 2
     records = [json.loads(line) for line in (tmp_path / "out/summary.jsonl").read_text().splitlines()]
     assert records[0]["reason"] == "ValueError: bad candidate"
+    failed_result = json.loads((tmp_path / "out/candidate_001/result.json").read_text())
+    assert failed_result["reason"] == records[0]["reason"]
     assert records[1]["candidate"] == 2
 
 
