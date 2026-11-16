@@ -18,7 +18,7 @@ Shuffle before splitting. Use the first 200 IDs as development and the remaining
 1. Confirm ID alignment, uniqueness, code columns, and at least one eligible row in both partitions.
 2. Iterate model/prompt/codebook candidates using `auto-research --train-only` on the development partition, passing a reference file containing only development IDs. Holdout labels stay outside candidate-author access. Preserve manifests and artifacts.
 3. Select one candidate before exposing holdout labels. Run the ordinary auto-research command once per question to score the holdout.
-4. Report pooled binary-cell Cohen's κ, evaluated cells, missing predictions, model/provider/endpoint, exact prompt/codebook, and commands. Undefined κ or fewer than 80% of eligible cells predicted is failure; always report missingness separately.
+4. Report pooled binary-cell Cohen's κ, evaluated cells, missing predictions, model/provider/endpoint, temperature, batch size, token limits, exact prompt/codebook, and commands. Undefined κ or fewer than 80% of eligible cells predicted is failure; always report missingness separately.
 5. Do not revise a candidate based on this holdout. Any further iteration requires another untouched validation set.
 
 Example input/reference paths and the correct approval for using a new sample must be supplied by the data owner; do not fabricate data or labels.
