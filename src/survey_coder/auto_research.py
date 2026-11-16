@@ -283,15 +283,19 @@ def main() -> None:
     summary_path.write_text("", encoding="utf-8")
     results = []
     for index, candidate in enumerate(candidates, start=1):
-        result = run_candidate(args, candidate, index, train_ids, reference, base_config)
+        try:
+            result = run_candidate(args, candidate, index, train_ids, reference, base_config)
+        except Exception as exc:
+            result = {"candidate": index, "success": False, "seconds": 0, "kappa": None,
+                      "reason": f"{type(exc).__name__}: {exc}"}
         results.append(result)
         with summary_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({k: result.get(k) for k in (
                 "candidate", "success", "seconds", "kappa", "evaluated_cells",
-                "missing_predictions", "prediction_coverage")}) + "\n")
+                "missing_predictions", "prediction_coverage", "reason")}) + "\n")
         print(json.dumps({k: result.get(k) for k in (
             "candidate", "success", "seconds", "kappa", "evaluated_cells",
-            "missing_predictions", "prediction_coverage")}), flush=True)
+            "missing_predictions", "prediction_coverage", "reason")}), flush=True)
     viable = [result for result in results if result.get("kappa") is not None
               and has_minimum_coverage(result["evaluated_cells"], result["missing_predictions"])]
     if not viable:

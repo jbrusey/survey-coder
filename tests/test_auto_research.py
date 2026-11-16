@@ -384,6 +384,28 @@ def test_train_only_rejects_holdout_labels_before_candidate_calls(tmp_path):
         run_candidate.assert_not_called()
 
 
+def test_candidate_setup_failure_does_not_abort_remaining_candidates(tmp_path):
+    frame = pd.DataFrame({"UserID": ["1", "2"], "Comment": ["a", "b"]})
+    frame.to_csv(tmp_path / "input.csv", index=False)
+    frame.iloc[:1].assign(A=[1]).to_csv(tmp_path / "reference.csv", index=False)
+    (tmp_path / "config.json").write_text(json.dumps({"streams": [{"name": "s"}]}))
+    (tmp_path / "candidates.json").write_text('[{}, {}]')
+    argv = ["auto-research", "--input", str(tmp_path / "input.csv"), "--reference",
+            str(tmp_path / "reference.csv"), "--config", str(tmp_path / "config.json"),
+            "--candidates", str(tmp_path / "candidates.json"), "--output-dir",
+            str(tmp_path / "out"), "--train-rows", "1", "--train-only"]
+    winner = {"candidate": 2, "success": False, "seconds": 1, "kappa": 0.5,
+              "evaluated_cells": 1, "missing_predictions": 0, "prediction_coverage": 1.0}
+    with patch.object(sys, "argv", argv), patch(
+        "survey_coder.auto_research.run_candidate", side_effect=[ValueError("bad candidate"), winner]
+    ) as run_candidate:
+        main()
+    assert run_candidate.call_count == 2
+    records = [json.loads(line) for line in (tmp_path / "out/summary.jsonl").read_text().splitlines()]
+    assert records[0]["reason"] == "ValueError: bad candidate"
+    assert records[1]["candidate"] == 2
+
+
 def test_train_only_flag_skips_holdout_coding(tmp_path):
     frame = pd.DataFrame({"UserID": ["1", "2"], "Comment": ["a", "b"]})
     frame.to_csv(tmp_path / "input.csv", index=False)
