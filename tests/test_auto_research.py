@@ -73,8 +73,9 @@ def test_evaluate_detailed_reports_per_code_support_and_missing_predictions():
     kappa, cells, missing, per_code = evaluate_detailed(
         coded, reference, [{"name": "stream"}], {"1", "2", "3"}, "UserID")
     assert (kappa, cells, missing) == (1.0, 2, 1)
-    assert per_code["stream_A"] == {"kappa": 1.0, "evaluated_cells": 2,
-                                    "missing_predictions": 1, "human_positive": 1,
+    assert per_code["stream_A"] == {"kappa": 1.0, "eligible_cells": 3,
+                                    "evaluated_cells": 2, "missing_predictions": 1,
+                                    "human_positive": 1,
                                     "model_positive": 1}
 
 

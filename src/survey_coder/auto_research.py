@@ -146,8 +146,8 @@ def evaluate_detailed(coded: pd.DataFrame, reference: pd.DataFrame, streams: lis
             true = pd.to_numeric(left[column], errors="coerce").fillna(0).astype(int)
             if pred_column not in left.columns:
                 missing += len(left)
-                per_code[pred_column] = {"kappa": None, "evaluated_cells": 0,
-                                         "missing_predictions": len(left),
+                per_code[pred_column] = {"kappa": None, "eligible_cells": len(left),
+                                         "evaluated_cells": 0, "missing_predictions": len(left),
                                          "human_positive": int(true.sum()),
                                          "model_positive": 0}
                 continue
@@ -166,7 +166,8 @@ def evaluate_detailed(coded: pd.DataFrame, reference: pd.DataFrame, streams: lis
                 code_kappa = None
             per_code[pred_column] = {
                 "kappa": float(code_kappa) if code_kappa is not None else None,
-                "evaluated_cells": len(code_true), "missing_predictions": missing_count,
+                "eligible_cells": len(left), "evaluated_cells": len(code_true),
+                "missing_predictions": missing_count,
                 "human_positive": int(true.sum()), "model_positive": int(sum(code_pred))}
     all_labels_same = human_cells and len(set(human_cells + model_cells)) == 1
     kappa = cohen_kappa_score(human_cells, model_cells) if human_cells and not all_labels_same else None

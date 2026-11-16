@@ -4,7 +4,7 @@
 first 200 rows for development, picks the best candidate by pooled binary-cell
 Cohen's kappa, and codes rows 201–400 once for final validation. The final output
 line is JSON containing only `success`, `seconds`, and `kappa`. Per-candidate logs,
-configs, prompt snapshots, codebook snapshots, and coded data are retained under the output directory for auditability. The effective candidate list is saved as `candidates.json`. Candidate and final result JSON, console summaries, and candidate `summary.jsonl` include evaluated/missing cell counts and prediction coverage. Candidate/final result JSON also report per-code kappa, human/model positive counts, and missing predictions. Candidate setup failures are recorded with a `reason` and do not stop later candidates.
+configs, prompt snapshots, codebook snapshots, and coded data are retained under the output directory for auditability. The effective candidate list is saved as `candidates.json`. Candidate and final result JSON, console summaries, and candidate `summary.jsonl` include evaluated/missing cell counts and prediction coverage. Candidate/final result JSON also report per-code kappa, eligible/evaluated cells, human/model positive counts, and missing predictions. Candidate setup failures are recorded with a `reason` and do not stop later candidates.
 
 ## Run
 
