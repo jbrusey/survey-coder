@@ -222,7 +222,9 @@ def test_run_candidate_snapshots_prompts(tmp_path):
     assert result.get("kappa") == 1.0, result.get("reason", result)
     snapshot = tmp_path / "out/candidate_001/prompts/system.txt"
     assert snapshot.read_text() == "original"
-    assert run.call_args.args[0][run.call_args.args[0].index("--prompt-dir") + 1] == str(snapshot.parent)
+    command = run.call_args.args[0]
+    assert command[command.index("--prompt-dir") + 1] == str(snapshot.parent)
+    assert command[command.index("--temperature") + 1] == "0.0"
     effective = json.loads((snapshot.parents[1] / "config.json").read_text())
     codebook_snapshot = Path(effective["streams"][0]["codebook"])
     assert codebook_snapshot.read_text() == "## A\noriginal codebook"
