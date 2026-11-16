@@ -70,7 +70,10 @@ def validate_benchmark_frames(input_df: pd.DataFrame, reference_df: pd.DataFrame
         for column in (id_column, comment_column):
             if column not in frame:
                 raise ValueError(f"{name} is missing required column {column!r}")
-        ids = frame[id_column].astype(str)
+        raw_ids = frame[id_column]
+        if raw_ids.isna().any() or raw_ids.astype(str).str.strip().eq("").any():
+            raise ValueError(f"{name} contains blank IDs")
+        ids = raw_ids.astype(str)
         if ids.duplicated().any():
             raise ValueError(f"{name} contains duplicate IDs")
     input_ids = input_df[id_column].astype(str)

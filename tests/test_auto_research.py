@@ -18,6 +18,10 @@ def test_validate_benchmark_frames_checks_columns_and_ids():
     frame = pd.DataFrame({"UserID": ["1", "2"], "Comment": ["a", "b"]})
     validate_benchmark_frames(frame, frame.copy(), "UserID", "Comment")
     validate_benchmark_frames(frame, frame.iloc[::-1], "UserID", "Comment")
+    with pytest.raises(ValueError, match="blank IDs"):
+        validate_benchmark_frames(
+            pd.DataFrame({"UserID": ["1", None], "Comment": ["a", "b"]}),
+            frame, "UserID", "Comment")
     with pytest.raises(ValueError, match="duplicate IDs"):
         validate_benchmark_frames(
             pd.DataFrame({"UserID": ["1", "1"], "Comment": ["a", "b"]}),
