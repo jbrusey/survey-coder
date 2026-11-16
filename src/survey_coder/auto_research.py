@@ -365,18 +365,26 @@ def main() -> None:
         cmd += ["--max-output-tokens", str(args.max_output_tokens)]
     cmd += ["--temperature", str(json.loads(best_config.read_text()).get("llm", {}).get("temperature", 0.0))]
     started = time.monotonic()
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    elapsed = time.monotonic() - started
-    (final_dir / "stdout.log").write_text(proc.stdout, encoding="utf-8")
-    (final_dir / "stderr.log").write_text(proc.stderr, encoding="utf-8")
-    final_kappa = None
-    if proc.returncode == 0 and coded_holdout_path.exists():
-        final_kappa, cells, missing, per_code = evaluate_detailed(
-            read_frame(str(coded_holdout_path)), reference,
-            json.loads(best_config.read_text())["streams"], holdout_ids,
-            args.id_column, args.comment_column)
-    else:
-        cells, missing = 0, len(holdout_ids)
+    reason = None
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        elapsed = time.monotonic() - started
+        (final_dir / "stdout.log").write_text(proc.stdout, encoding="utf-8")
+        (final_dir / "stderr.log").write_text(proc.stderr, encoding="utf-8")
+        final_kappa = None
+        if proc.returncode == 0 and coded_holdout_path.exists():
+            final_kappa, cells, missing, per_code = evaluate_detailed(
+                read_frame(str(coded_holdout_path)), reference,
+                json.loads(best_config.read_text())["streams"], holdout_ids,
+                args.id_column, args.comment_column)
+        else:
+            cells, missing = 0, len(holdout_ids)
+            reason = "coding process failed"
+    except Exception as exc:
+        elapsed = time.monotonic() - started
+        final_kappa, cells, missing, per_code = None, 0, len(holdout_ids), {}
+        reason = f"{type(exc).__name__}: {exc}"
+        (final_dir / "stderr.log").write_text(reason, encoding="utf-8")
     outcome = {"success": final_kappa is not None and final_kappa >= args.target_kappa
                and has_minimum_coverage(cells, missing),
                "seconds": round(sum(x["seconds"] for x in results) + elapsed, 2),
@@ -385,7 +393,7 @@ def main() -> None:
                "holdout_rows": len(holdout_ids), "evaluated_cells": cells,
                "missing_predictions": missing,
                "prediction_coverage": round(prediction_coverage(cells, missing), 4),
-               "per_code": per_code if proc.returncode == 0 and coded_holdout_path.exists() else {}}
+               "per_code": per_code, "reason": reason}
     (out / "final_result.json").write_text(json.dumps(outcome, indent=2), encoding="utf-8")
     print(json.dumps({k: outcome[k] for k in ("success", "seconds", "kappa")}), flush=True)
 

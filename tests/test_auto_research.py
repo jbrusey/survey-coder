@@ -245,6 +245,34 @@ def test_final_validation_uses_selected_prompt_snapshot(tmp_path):
     assert outcome["per_code"]["s_A"]["eligible_cells"] == 2
 
 
+def test_final_validation_exception_is_written_as_failed_result(tmp_path):
+    frame = pd.DataFrame({"UserID": ["1", "2", "3", "4"], "Comment": list("abcd")})
+    frame.to_csv(tmp_path / "input.csv", index=False)
+    frame.assign(A=[1, 0, 1, 0]).to_csv(tmp_path / "reference.csv", index=False)
+    (tmp_path / "config.json").write_text('{"streams":[{"name":"s"}]}')
+    (tmp_path / "candidates.json").write_text('[{}]')
+    argv = ["auto-research", "--input", str(tmp_path / "input.csv"), "--reference",
+            str(tmp_path / "reference.csv"), "--config", str(tmp_path / "config.json"),
+            "--candidates", str(tmp_path / "candidates.json"), "--output-dir",
+            str(tmp_path / "out"), "--train-rows", "2"]
+
+    def candidate_result(*args):
+        candidate_dir = tmp_path / "out/candidate_001"
+        candidate_dir.mkdir(parents=True)
+        config_path = candidate_dir / "config.json"
+        config_path.write_text('{"streams":[{"name":"s"}]}')
+        return {"candidate": 1, "success": True, "seconds": 0, "kappa": 1.0,
+                "evaluated_cells": 2, "missing_predictions": 0, "config": str(config_path)}
+
+    with patch.object(sys, "argv", argv), patch(
+        "survey_coder.auto_research.run_candidate", side_effect=candidate_result
+    ), patch("survey_coder.auto_research.subprocess.run", side_effect=OSError("launch failed")):
+        main()
+    result = json.loads((tmp_path / "out/final_result.json").read_text())
+    assert result["success"] is False
+    assert result["reason"] == "OSError: launch failed"
+
+
 def test_run_candidate_rejects_non_markdown_codebook_before_model_call(tmp_path):
     prompts = tmp_path / "prompts"
     prompts.mkdir()
