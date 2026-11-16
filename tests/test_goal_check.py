@@ -17,6 +17,18 @@ def write_final_result(root, question, evaluated, missing):
     }))
 
 
+def test_goal_check_accepts_exact_kappa_and_coverage_thresholds(tmp_path):
+    for question in ("question_1", "question_2"):
+        write_final_result(tmp_path, question, 80, 20)
+        path = tmp_path / "outputs/staff_pulse/auto_research" / question / "final_result.json"
+        result = json.loads(path.read_text())
+        result["kappa"] = 0.60
+        path.write_text(json.dumps(result))
+    checked = subprocess.run([str(CHECK)], cwd=tmp_path, capture_output=True, text=True)
+    assert checked.returncode == 0
+    assert "SCORE: 60" in checked.stdout
+
+
 def test_goal_check_rejects_malformed_counts(tmp_path):
     write_final_result(tmp_path, "question_1", 100, 0)
     write_final_result(tmp_path, "question_2", 100, 0)
