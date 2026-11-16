@@ -30,16 +30,16 @@ class ApplyCodebooksProviderTests(unittest.TestCase):
         load_config.return_value = {
             "llm": {"temperature": 0.4}, "streams": [{"name": "Q1"}], "context": ""
         }
-        load_data.return_value = pd.DataFrame([{"ID": "R1", "Comment": "text"}])
+        load_data.return_value = pd.DataFrame([{"ResponseID": "R1", "Comment": "text"}])
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "coded.csv"
-            with patch.object(sys, "argv", ["apply_codebooks", "--input", "in.csv",
-                                             "--output", str(output), "--config", "config.json"]):
+            argv = ["apply_codebooks", "--input", "in.csv", "--output", str(output),
+                    "--config", "config.json", "--id-column", "ResponseID"]
+            with patch.object(sys, "argv", argv):
                 apply_codebooks.main()
+            load_data.assert_called_with("in.csv", "ResponseID")
             self.assertEqual(process_stream.call_args.args[3].temperature, 0.4)
-            with patch.object(sys, "argv", ["apply_codebooks", "--input", "in.csv",
-                                             "--output", str(output), "--config", "config.json",
-                                             "--temperature", "0.2"]):
+            with patch.object(sys, "argv", argv + ["--temperature", "0.2"]):
                 apply_codebooks.main()
             self.assertEqual(process_stream.call_args.args[3].temperature, 0.2)
 
