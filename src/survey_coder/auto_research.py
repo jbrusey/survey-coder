@@ -279,6 +279,8 @@ def main() -> None:
     args = parse_args()
     if args.batch_size < 1:
         raise ValueError("--batch-size must be a positive integer")
+    if not math.isfinite(args.target_kappa) or not 0 <= args.target_kappa <= 1:
+        raise ValueError("--target-kappa must be finite and between 0 and 1")
     input_df, reference = read_frame(args.input), read_frame(args.reference)
     validate_benchmark_frames(input_df, reference, args.id_column, args.comment_column,
                               allow_reference_subset=args.train_only)

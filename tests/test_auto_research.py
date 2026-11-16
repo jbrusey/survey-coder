@@ -22,6 +22,15 @@ def test_main_rejects_nonpositive_batch_size_before_reading_inputs():
         main()
 
 
+@pytest.mark.parametrize("target", ["nan", "-0.1", "1.01"])
+def test_main_rejects_invalid_target_kappa_before_reading_inputs(target):
+    argv = ["auto-research", "--input", "missing.csv", "--reference", "missing.csv",
+            "--config", "missing.json", "--candidates", "missing.json",
+            "--output-dir", "unused", "--target-kappa", target]
+    with patch.object(sys, "argv", argv), pytest.raises(ValueError, match="target-kappa"):
+        main()
+
+
 def test_validate_benchmark_frames_checks_columns_and_ids():
     frame = pd.DataFrame({"UserID": ["1", "2"], "Comment": ["a", "b"]})
     validate_benchmark_frames(frame, frame.copy(), "UserID", "Comment")
