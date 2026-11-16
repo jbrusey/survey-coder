@@ -148,6 +148,11 @@ def test_evaluate_counts_entirely_missing_prediction_column():
     assert kappa is None
     assert cells == 0
     assert missing == 2
+    _, _, _, per_code = evaluate_detailed(
+        coded, reference, [{"name": "stream"}], {"1", "2"}, "UserID")
+    assert per_code["stream_A"] == {"kappa": None, "eligible_cells": 2,
+                                    "evaluated_cells": 0, "missing_predictions": 2,
+                                    "human_positive": 1, "model_positive": 0}
 
 
 def test_minimum_coverage_gate():
