@@ -344,10 +344,28 @@ def test_main_preserves_existing_output_artifacts(tmp_path):
     assert artifact.read_text() == "preserve me"
 
 
-def test_train_only_flag_skips_holdout_coding(tmp_path):
+def test_train_only_rejects_holdout_labels_before_candidate_calls(tmp_path):
     frame = pd.DataFrame({"UserID": ["1", "2"], "Comment": ["a", "b"]})
     frame.to_csv(tmp_path / "input.csv", index=False)
     frame.assign(A=[1, 0]).to_csv(tmp_path / "reference.csv", index=False)
+    (tmp_path / "config.json").write_text(json.dumps({"streams": [{"name": "s"}]}))
+    (tmp_path / "candidates.json").write_text('[{}]')
+    argv = ["auto-research", "--input", str(tmp_path / "input.csv"), "--reference",
+            str(tmp_path / "reference.csv"), "--config", str(tmp_path / "config.json"),
+            "--candidates", str(tmp_path / "candidates.json"), "--output-dir",
+            str(tmp_path / "out"), "--train-rows", "1", "--train-only"]
+    with patch.object(sys, "argv", argv), patch(
+        "survey_coder.auto_research.run_candidate"
+    ) as run_candidate:
+        with pytest.raises(ValueError, match="reference must contain development IDs only"):
+            main()
+        run_candidate.assert_not_called()
+
+
+def test_train_only_flag_skips_holdout_coding(tmp_path):
+    frame = pd.DataFrame({"UserID": ["1", "2"], "Comment": ["a", "b"]})
+    frame.to_csv(tmp_path / "input.csv", index=False)
+    frame.iloc[:1].assign(A=[1]).to_csv(tmp_path / "reference.csv", index=False)
     (tmp_path / "config.json").write_text(json.dumps({"streams": [{"name": "s"}]}))
     (tmp_path / "candidates.json").write_text('[{}]')
     argv = ["auto-research", "--input", str(tmp_path / "input.csv"), "--reference",

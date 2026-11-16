@@ -64,7 +64,8 @@ def read_frame(path: str) -> pd.DataFrame:
 
 
 def validate_benchmark_frames(input_df: pd.DataFrame, reference_df: pd.DataFrame,
-                               id_column: str, comment_column: str) -> None:
+                               id_column: str, comment_column: str,
+                               allow_reference_subset: bool = False) -> None:
     for name, frame in (("input", input_df), ("reference", reference_df)):
         for column in (id_column, comment_column):
             if column not in frame:
@@ -74,8 +75,10 @@ def validate_benchmark_frames(input_df: pd.DataFrame, reference_df: pd.DataFrame
             raise ValueError(f"{name} contains duplicate IDs")
     input_ids = input_df[id_column].astype(str)
     reference_ids = reference_df[id_column].astype(str)
-    if set(input_ids) != set(reference_ids):
+    if not allow_reference_subset and set(input_ids) != set(reference_ids):
         raise ValueError("Input and reference ID sets do not match")
+    if not set(reference_ids).issubset(input_ids):
+        raise ValueError("Reference IDs must be present in the input")
     input_comments = input_df.assign(**{id_column: input_ids}).set_index(id_column)[comment_column]
     reference_comments = reference_df.assign(**{id_column: reference_ids}).set_index(id_column)[comment_column]
     input_comments = input_comments.fillna("").astype(str).str.strip()
@@ -83,7 +86,7 @@ def validate_benchmark_frames(input_df: pd.DataFrame, reference_df: pd.DataFrame
     missing_markers = {"", "D/A", "N/A"}
     input_comments = input_comments.mask(input_comments.str.upper().isin(missing_markers), "")
     reference_comments = reference_comments.mask(reference_comments.str.upper().isin(missing_markers), "")
-    if not input_comments.equals(reference_comments.reindex(input_comments.index)):
+    if not reference_comments.equals(input_comments.reindex(reference_comments.index)):
         raise ValueError("Input and reference comments do not match by ID")
 
 
@@ -237,7 +240,8 @@ def run_candidate(args: argparse.Namespace, candidate: dict[str, Any], index: in
 def main() -> None:
     args = parse_args()
     input_df, reference = read_frame(args.input), read_frame(args.reference)
-    validate_benchmark_frames(input_df, reference, args.id_column, args.comment_column)
+    validate_benchmark_frames(input_df, reference, args.id_column, args.comment_column,
+                              allow_reference_subset=args.train_only)
     validate_reference_codes(reference, args.id_column, args.comment_column)
     base_config = json.loads(Path(args.config).read_text(encoding="utf-8"))
     candidates = json.loads(Path(args.candidates).read_text(encoding="utf-8"))
@@ -254,11 +258,14 @@ def main() -> None:
         raise ValueError(f"--train-rows must be between 1 and {len(all_ids) - 1}")
     train_ids = set(all_ids[:args.train_rows])
     holdout_ids = set(all_ids[args.train_rows:])
+    reference_ids = set(reference[args.id_column].astype(str))
+    if args.train_only and not reference_ids.issubset(train_ids):
+        raise ValueError("--train-only reference must contain development IDs only")
     valid = eligible_ids(input_df, reference, args.id_column, args.comment_column)
     train_ids &= valid
     holdout_ids &= valid
-    if not train_ids or not holdout_ids:
-        raise ValueError("Both the development and holdout partitions need eligible labeled rows")
+    if not train_ids or (not args.train_only and not holdout_ids):
+        raise ValueError("Required development/holdout partitions need eligible labeled rows")
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     if any(out.iterdir()):

@@ -14,7 +14,7 @@ candidate overrides in a JSON list; supported keys are `llm`, `config`,
 (mapping prompt filenames to full replacement text).
 
 ```bash
-uv run auto-research \
+uv run python -m survey_coder.auto_research \
   --input outputs/staff_pulse/handcoded_comparison/question_1_input.csv \
   --reference outputs/staff_pulse/handcoded_comparison/question_1_reference.csv \
   --config outputs/staff_pulse/handcoded_comparison/question_1_config.json \
@@ -24,9 +24,11 @@ uv run auto-research \
 ```
 
 The example is development-only: it evaluates candidates on development rows
-and returns without coding or scoring holdout. Do not remove `--train-only`
-for these consumed benchmark files. Use ordinary final validation only with a
-newly designated untouched holdout under the approved protocol.
+and returns without coding or scoring holdout. With `--train-only`, the
+reference must contain development IDs only, so holdout labels are not
+available to candidate runs. Do not remove `--train-only` for these consumed
+benchmark files. Use ordinary final validation only with a newly designated
+untouched holdout under the approved protocol.
 
 The reference file must contain exactly one row per input ID, a `Comment` column, and one
 binary/blank column per human code. Reference values outside `0`, `1`, and blank are rejected. The coded output must have matching
