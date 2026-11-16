@@ -35,7 +35,8 @@ For final validation, the reference must contain exactly one row per input ID. I
 `Comment` column and one binary/blank column per human code; values outside
 `0`, `1`, and blank are rejected. Each candidate codebook's
 headers must exactly match the reference code columns. The coded output must have matching
-`<stream-prefix>_<human-code>` columns. The runner excludes blank, `D/A`, and
+`<stream-prefix>_<human-code>` columns; duplicate prediction columns across streams
+are rejected to prevent double-weighting. The runner excludes blank, `D/A`, and
 `N/A` comments from evaluation, treats an unmarked human code as zero, and drops
 missing model predictions rather than counting them as negative. A candidate is
 not viable if it predicts fewer than 80% of eligible binary cells. It fails to
