@@ -88,6 +88,17 @@ def test_goal_check_rejects_boolean_metric_values(tmp_path, key, value):
     assert checked.returncode == 1
 
 
+def test_goal_check_rejects_kappa_too_large_to_convert(tmp_path):
+    write_final_result(tmp_path, "question_1", 100, 0)
+    write_final_result(tmp_path, "question_2", 100, 0)
+    path = tmp_path / "outputs/staff_pulse/auto_research/question_1/final_result.json"
+    result = json.loads(path.read_text())
+    result["kappa"] = 10 ** 1000
+    path.write_text(json.dumps(result))
+    checked = subprocess.run([str(CHECK)], cwd=tmp_path, capture_output=True, text=True)
+    assert checked.returncode == 1
+
+
 def test_goal_check_rejects_out_of_range_kappa(tmp_path):
     write_final_result(tmp_path, "question_1", 100, 0)
     write_final_result(tmp_path, "question_2", 100, 0)
