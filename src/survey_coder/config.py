@@ -65,10 +65,14 @@ def load_config(path: str | None) -> Dict[str, Any]:
         if option in llm and not isinstance(llm[option], bool):
             raise ValueError(f"Config llm.{option} must be a boolean")
     temperature = llm.get("temperature")
-    if temperature is not None and (
-            type(temperature) not in (int, float) or not math.isfinite(temperature)
-            or temperature < 0):
-        raise ValueError("Config llm.temperature must be finite and nonnegative")
+    if temperature is not None:
+        try:
+            valid_temperature = (type(temperature) in (int, float)
+                                 and math.isfinite(temperature) and temperature >= 0)
+        except OverflowError:
+            valid_temperature = False
+        if not valid_temperature:
+            raise ValueError("Config llm.temperature must be finite and nonnegative")
     max_output_tokens = llm.get("max_output_tokens")
     if max_output_tokens is not None and (
             not isinstance(max_output_tokens, int) or isinstance(max_output_tokens, bool)
