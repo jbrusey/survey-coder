@@ -17,8 +17,12 @@ from survey_coder.auto_research import (eligible_ids, evaluate, evaluate_detaile
 def test_read_frame_preserves_leading_zeroes_for_custom_id_column(tmp_path):
     path = tmp_path / "input.csv"
     path.write_text("ResponseID,Comment\n001,comment\n", encoding="utf-8")
+    reference_path = tmp_path / "reference.csv"
+    reference_path.write_text("ResponseID,Comment,Helpful\n001,comment,1\n", encoding="utf-8")
     frame = read_frame(str(path), "ResponseID")
+    reference = read_frame(str(reference_path), "ResponseID")
     assert frame.loc[0, "ResponseID"] == "001"
+    validate_benchmark_frames(frame, reference, "ResponseID", "Comment")
 
 
 @pytest.mark.parametrize("batch_size", ["0", "-1"])
