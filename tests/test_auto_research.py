@@ -171,7 +171,7 @@ def test_final_validation_uses_selected_prompt_snapshot(tmp_path):
     (prompts / "system.txt").write_text("stable prompt")
     codebook = tmp_path / "codes.md"
     codebook.write_text("## A")
-    frame = pd.DataFrame({"UserID": ["1", "2", "3", "4"], "Comment": list("abcd")})
+    frame = pd.DataFrame({"UserID": ["1", "2", "3", "4"], "Response": list("abcd")})
     frame.to_csv(tmp_path / "input.csv", index=False)
     frame.assign(A=[1, 0, 1, 0]).to_csv(tmp_path / "reference.csv", index=False)
     (tmp_path / "config.json").write_text(json.dumps({"streams": [{"name": "s", "codebook": str(codebook)}]}))
@@ -179,7 +179,7 @@ def test_final_validation_uses_selected_prompt_snapshot(tmp_path):
     argv = ["auto-research", "--input", str(tmp_path / "input.csv"), "--reference",
             str(tmp_path / "reference.csv"), "--config", str(tmp_path / "config.json"),
             "--candidates", str(tmp_path / "candidates.json"), "--output-dir", str(tmp_path / "out"),
-            "--prompt-dir", str(prompts), "--train-rows", "2"]
+            "--prompt-dir", str(prompts), "--train-rows", "2", "--comment-column", "Response"]
     commands = []
     def fake_run(command, **kwargs):
         commands.append(command)
@@ -194,6 +194,9 @@ def test_final_validation_uses_selected_prompt_snapshot(tmp_path):
     assert len(commands) == 2
     assert commands[1][commands[1].index("--prompt-dir") + 1] == str(
         tmp_path / "out/candidate_001/prompts")
+    outcome = json.loads((tmp_path / "out/final_result.json").read_text())
+    assert outcome["success"] is True
+    assert outcome["evaluated_cells"] == 2
 
 
 def test_run_candidate_rejects_non_markdown_codebook_before_model_call(tmp_path):
