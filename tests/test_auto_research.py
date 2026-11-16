@@ -122,6 +122,11 @@ def test_evaluate_constant_disagreement_has_zero_kappa():
     assert kappa == 0.0
     assert cells == 2
     assert missing == 0
+    _, _, _, per_code = evaluate_detailed(
+        coded, reference, [{"name": "stream"}], {"1", "2"}, "UserID")
+    assert per_code["stream_A"]["kappa"] == 0.0
+    assert (per_code["stream_A"]["human_negative"],
+            per_code["stream_A"]["model_positive"]) == (2, 2)
 
 
 def test_evaluate_counts_nonbinary_predictions_as_missing():
