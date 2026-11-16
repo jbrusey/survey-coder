@@ -207,6 +207,10 @@ def run_candidate(args: argparse.Namespace, candidate: dict[str, Any], index: in
         for stream in candidate_config["streams"]:
             if stream["name"] in candidate["codebooks"]:
                 stream["codebook"] = candidate["codebooks"][stream["name"]]
+    temperature = candidate_config.get("llm", {}).get("temperature", 0.0)
+    if (isinstance(temperature, bool) or not isinstance(temperature, (int, float))
+            or not math.isfinite(temperature) or temperature < 0):
+        raise ValueError("LLM temperature must be a finite nonnegative number")
     prompt_dir = out / "prompts"
     shutil.copytree(args.prompt_dir, prompt_dir, dirs_exist_ok=True)
     for filename, content in candidate.get("prompts", {}).items():

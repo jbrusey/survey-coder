@@ -333,6 +333,22 @@ def test_final_evaluation_error_preserves_subprocess_stderr(tmp_path):
     assert "one-to-one" in stderr
 
 
+@pytest.mark.parametrize("temperature", [float("nan"), -0.1, True, "warm"])
+def test_run_candidate_rejects_invalid_temperature_before_model_call(tmp_path, temperature):
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    (prompts / "system.txt").write_text("safe")
+    args = SimpleNamespace(output_dir=str(tmp_path / "out"), prompt_dir=str(prompts),
+                           input="unused.csv", id_column="UserID", batch_size=1,
+                           max_output_tokens=None, provider=None, model=None, base_url=None,
+                           temperature=None, comment_column="Comment", target_kappa=0.6)
+    with patch("survey_coder.auto_research.subprocess.run") as run:
+        with pytest.raises(ValueError, match="temperature"):
+            run_candidate(args, {}, 1, set(), pd.DataFrame(),
+                          {"streams": [], "llm": {"temperature": temperature}})
+        run.assert_not_called()
+
+
 def test_run_candidate_rejects_non_markdown_codebook_before_model_call(tmp_path):
     prompts = tmp_path / "prompts"
     prompts.mkdir()
