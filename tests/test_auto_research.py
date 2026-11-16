@@ -9,9 +9,16 @@ import pytest
 from sklearn.metrics import cohen_kappa_score
 
 from survey_coder.auto_research import (eligible_ids, evaluate, evaluate_detailed, has_minimum_coverage,
-                                        main, parse_args,
+                                        main, parse_args, read_frame,
                                         prediction_coverage, run_candidate,
                                         validate_benchmark_frames)
+
+
+def test_read_frame_preserves_leading_zeroes_for_custom_id_column(tmp_path):
+    path = tmp_path / "input.csv"
+    path.write_text("ResponseID,Comment\n001,comment\n", encoding="utf-8")
+    frame = read_frame(str(path), "ResponseID")
+    assert frame.loc[0, "ResponseID"] == "001"
 
 
 @pytest.mark.parametrize("batch_size", ["0", "-1"])

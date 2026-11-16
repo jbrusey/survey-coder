@@ -60,8 +60,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def read_frame(path: str) -> pd.DataFrame:
-    return pd.read_csv(path, dtype={"UserID": str})
+def read_frame(path: str, id_column: str = "UserID") -> pd.DataFrame:
+    return pd.read_csv(path, dtype={id_column: str})
 
 
 def validate_benchmark_frames(input_df: pd.DataFrame, reference_df: pd.DataFrame,
@@ -238,7 +238,7 @@ def run_candidate(args: argparse.Namespace, candidate: dict[str, Any], index: in
 
     config_path = out / "config.json"
     config_path.write_text(json.dumps(candidate_config, indent=2), encoding="utf-8")
-    input_df = read_frame(args.input)
+    input_df = read_frame(args.input, args.id_column)
     train_mask = input_df[args.id_column].astype(str).isin(train_ids)
     train_path = out / "train_input.csv"
     input_df.loc[train_mask].to_csv(train_path, index=False)
@@ -258,7 +258,7 @@ def run_candidate(args: argparse.Namespace, candidate: dict[str, Any], index: in
         if proc.returncode != 0 or not coded_path.exists():
             return {"candidate": index, "success": False, "seconds": round(elapsed, 2), "kappa": None,
                     "reason": "coding process failed"}
-        coded = read_frame(str(coded_path))
+        coded = read_frame(str(coded_path), args.id_column)
         streams = candidate_config["streams"]
         train_kappa, train_cells, train_missing, per_code = evaluate_detailed(
             coded, reference, streams, train_ids, args.id_column, args.comment_column)
@@ -285,7 +285,8 @@ def main() -> None:
         raise ValueError("--batch-size must be a positive integer")
     if not math.isfinite(args.target_kappa) or not 0 <= args.target_kappa <= 1:
         raise ValueError("--target-kappa must be finite and between 0 and 1")
-    input_df, reference = read_frame(args.input), read_frame(args.reference)
+    input_df = read_frame(args.input, args.id_column)
+    reference = read_frame(args.reference, args.id_column)
     validate_benchmark_frames(input_df, reference, args.id_column, args.comment_column,
                               allow_reference_subset=args.train_only)
     validate_reference_codes(reference, args.id_column, args.comment_column)
@@ -381,7 +382,7 @@ def main() -> None:
         final_kappa = None
         if proc.returncode == 0 and coded_holdout_path.exists():
             final_kappa, cells, missing, per_code = evaluate_detailed(
-                read_frame(str(coded_holdout_path)), reference,
+                read_frame(str(coded_holdout_path), args.id_column), reference,
                 json.loads(best_config.read_text())["streams"], holdout_ids,
                 args.id_column, args.comment_column)
         else:
