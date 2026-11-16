@@ -79,6 +79,7 @@ class ApplyCodebooksProviderTests(unittest.TestCase):
         self.assertEqual(request["contents"], "system\n\nprompt")
         self.assertEqual(request["config"].response_mime_type, "application/json")
         self.assertEqual(request["config"].max_output_tokens, 123)
+        self.assertEqual(request["config"].temperature, 0.2)
 
     @patch("survey_coder.apply_codebooks.OpenAI")
     def test_openwebui_accepts_completion_text_returned_directly(self, openai):
