@@ -31,7 +31,8 @@ benchmark files. Use ordinary final validation only with a newly designated
 untouched holdout under the approved protocol.
 
 The reference file must contain exactly one row per input ID, a `Comment` column, and one
-binary/blank column per human code. Reference values outside `0`, `1`, and blank are rejected. The coded output must have matching
+binary/blank column per human code. Reference values outside `0`, `1`, and blank are rejected. Each candidate codebook's
+headers must exactly match the reference code columns. The coded output must have matching
 `<stream-prefix>_<human-code>` columns. The runner excludes blank, `D/A`, and
 `N/A` comments from evaluation, treats an unmarked human code as zero, and drops
 missing model predictions rather than counting them as negative. A candidate is
