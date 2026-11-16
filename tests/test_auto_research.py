@@ -376,9 +376,11 @@ def test_train_only_flag_skips_holdout_coding(tmp_path):
               "evaluated_cells": 10, "missing_predictions": 0, "prediction_coverage": 1.0}
     with patch.object(sys, "argv", argv), patch(
         "survey_coder.auto_research.run_candidate", return_value=result
-    ):
+    ) as run_candidate:
         main()
 
+    passed_reference = run_candidate.call_args.args[4]
+    assert set(passed_reference["UserID"]) == {"1"}
     assert not (tmp_path / "out/final_validation").exists()
     assert not (tmp_path / "out/final_result.json").exists()
     assert json.loads((tmp_path / "out/candidates.json").read_text()) == [{}]
