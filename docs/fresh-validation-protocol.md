@@ -1,6 +1,6 @@
 # Fresh validation protocol
 
-The original 200-row holdout for each staff-pulse question has been evaluated and must not be reused for candidate selection or tuning. The current Qwen2.5-Coder candidate did not meet κ ≥ 0.60. This protocol defines the next valid evaluation set; it does not create or relabel data.
+The original 200-row holdout for each staff-pulse question has been evaluated and must not be reused. Candidate comparisons also repeatedly used the original 200-row development partition, so it is no longer suitable for further tuning. The current Qwen2.5-Coder candidate did not meet κ ≥ 0.60. This protocol defines the next valid evaluation set; it does not create or relabel data.
 
 ## Data required
 
@@ -11,7 +11,7 @@ For each question, provide a newly sampled, representative set of at least 400 c
 - Human coding completed independently of model predictions. Keep the holdout labels inaccessible to candidate authors until final scoring.
 - A documented sampling frame, date, inclusion/exclusion rules, and coder/adjudication process.
 
-Shuffle before splitting. Use the first 200 IDs as development and the remaining rows as a sealed holdout. Exclude blank/D/A/N/A comments consistently. Do not copy rows from the consumed benchmark holdout into the replacement set.
+Exclude comments/IDs from both consumed benchmark partitions. Shuffle the fresh sample before splitting; use the first 200 IDs as development and the remaining rows as a sealed holdout. Exclude blank/D/A/N/A comments consistently.
 
 ## Run and record
 
