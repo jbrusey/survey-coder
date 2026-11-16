@@ -296,6 +296,8 @@ def test_final_validation_failure_is_written_as_failed_result(tmp_path, failure,
     result = json.loads((tmp_path / "out/final_result.json").read_text())
     assert result["success"] is False
     assert result["reason"] == reason
+    if isinstance(failure, OSError):
+        assert (tmp_path / "out/final_validation/stderr.log").read_text() == reason
 
 
 def test_run_candidate_rejects_non_markdown_codebook_before_model_call(tmp_path):

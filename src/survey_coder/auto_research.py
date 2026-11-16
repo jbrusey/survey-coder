@@ -387,7 +387,10 @@ def main() -> None:
         elapsed = time.monotonic() - started
         final_kappa, cells, missing, per_code = None, 0, len(holdout_ids), {}
         reason = f"{type(exc).__name__}: {exc}"
-        (final_dir / "stderr.log").write_text(reason, encoding="utf-8")
+        stderr_path = final_dir / "stderr.log"
+        previous_stderr = stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else ""
+        stderr_path.write_text("\n".join(part for part in (previous_stderr.rstrip(), reason) if part),
+                               encoding="utf-8")
     outcome = {"success": final_kappa is not None and final_kappa >= args.target_kappa
                and has_minimum_coverage(cells, missing),
                "seconds": round(sum(x["seconds"] for x in results) + elapsed, 2),
