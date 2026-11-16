@@ -99,6 +99,13 @@ def test_evaluate_joins_predictions_by_id_not_row_order():
     assert missing == 0
 
 
+def test_evaluate_rejects_duplicate_stream_prediction_columns():
+    reference = pd.DataFrame({"UserID": ["1"], "Comment": ["a"], "A": [1]})
+    coded = pd.DataFrame({"UserID": ["1"], "same_A": [1]})
+    with pytest.raises(ValueError, match="duplicate prediction columns"):
+        evaluate(coded, reference, [{"name": "same"}, {"name": "same"}], {"1"}, "UserID")
+
+
 def test_evaluate_rejects_nonbinary_reference_labels():
     reference = pd.DataFrame({"UserID": ["1"], "Comment": ["a"], "A": ["yes"]})
     coded = pd.DataFrame({"UserID": ["1"], "stream_A": [1]})

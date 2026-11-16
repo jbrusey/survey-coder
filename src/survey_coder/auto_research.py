@@ -130,6 +130,11 @@ def evaluate_detailed(coded: pd.DataFrame, reference: pd.DataFrame, streams: lis
     validate_reference_codes(reference, id_column, comment_column)
     coded[id_column] = coded[id_column].astype(str)
     reference[id_column] = reference[id_column].astype(str)
+    codes = [column for column in reference.columns if column not in {id_column, comment_column}]
+    prediction_columns = [f"{stream.get('prefix', stream['name'])}_{code}"
+                          for stream in streams for code in codes]
+    if len(prediction_columns) != len(set(prediction_columns)):
+        raise ValueError("Streams produce duplicate prediction columns")
     left = reference[reference[id_column].isin(ids)].merge(
         coded, on=id_column, how="left", suffixes=("_human", "_model"), validate="one_to_one"
     )
