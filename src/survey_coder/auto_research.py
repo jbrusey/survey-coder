@@ -366,6 +366,7 @@ def main() -> None:
     cmd += ["--temperature", str(json.loads(best_config.read_text()).get("llm", {}).get("temperature", 0.0))]
     started = time.monotonic()
     reason = None
+    per_code = {}
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         elapsed = time.monotonic() - started

@@ -245,7 +245,11 @@ def test_final_validation_uses_selected_prompt_snapshot(tmp_path):
     assert outcome["per_code"]["s_A"]["eligible_cells"] == 2
 
 
-def test_final_validation_exception_is_written_as_failed_result(tmp_path):
+@pytest.mark.parametrize(("failure", "reason"), [
+    (OSError("launch failed"), "OSError: launch failed"),
+    (SimpleNamespace(returncode=1, stdout="", stderr="failed"), "coding process failed"),
+])
+def test_final_validation_failure_is_written_as_failed_result(tmp_path, failure, reason):
     frame = pd.DataFrame({"UserID": ["1", "2", "3", "4"], "Comment": list("abcd")})
     frame.to_csv(tmp_path / "input.csv", index=False)
     frame.assign(A=[1, 0, 1, 0]).to_csv(tmp_path / "reference.csv", index=False)
@@ -266,11 +270,11 @@ def test_final_validation_exception_is_written_as_failed_result(tmp_path):
 
     with patch.object(sys, "argv", argv), patch(
         "survey_coder.auto_research.run_candidate", side_effect=candidate_result
-    ), patch("survey_coder.auto_research.subprocess.run", side_effect=OSError("launch failed")):
+    ), patch("survey_coder.auto_research.subprocess.run", side_effect=[failure]):
         main()
     result = json.loads((tmp_path / "out/final_result.json").read_text())
     assert result["success"] is False
-    assert result["reason"] == "OSError: launch failed"
+    assert result["reason"] == reason
 
 
 def test_run_candidate_rejects_non_markdown_codebook_before_model_call(tmp_path):
