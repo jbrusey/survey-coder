@@ -19,6 +19,7 @@ from typing import Any
 
 import pandas as pd
 from sklearn.metrics import cohen_kappa_score
+from .apply_codebooks import extract_codes_from_md
 
 
 MIN_COVERAGE = 0.8
@@ -196,6 +197,10 @@ def run_candidate(args: argparse.Namespace, candidate: dict[str, Any], index: in
         snapshot = out / "codebooks" / f"{stream_index}_{source.name}"
         snapshot.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, snapshot)
+        codes = extract_codes_from_md(str(snapshot))
+        expected = set(reference.columns) - {args.id_column, args.comment_column}
+        if len(codes) != len(expected) or set(codes) != expected:
+            raise ValueError(f"Codebook codes do not match reference columns: {source}")
         stream["codebook"] = str(snapshot.resolve())
 
     config_path = out / "config.json"

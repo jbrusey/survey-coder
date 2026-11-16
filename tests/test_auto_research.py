@@ -145,7 +145,7 @@ def test_run_candidate_snapshots_prompts(tmp_path):
     input_path = tmp_path / "input.csv"
     pd.DataFrame({"UserID": ["1", "2"], "Comment": ["a", "b"]}).to_csv(input_path, index=False)
     codebook = tmp_path / "codes.md"
-    codebook.write_text("original codebook")
+    codebook.write_text("## A\noriginal codebook")
     args = SimpleNamespace(output_dir=str(tmp_path / "out"), prompt_dir=str(prompts),
                            input=str(input_path), id_column="UserID", batch_size=1,
                            max_output_tokens=None, provider=None, model=None,
@@ -165,7 +165,7 @@ def test_run_candidate_snapshots_prompts(tmp_path):
     assert run.call_args.args[0][run.call_args.args[0].index("--prompt-dir") + 1] == str(snapshot.parent)
     effective = json.loads((snapshot.parents[1] / "config.json").read_text())
     codebook_snapshot = Path(effective["streams"][0]["codebook"])
-    assert codebook_snapshot.read_text() == "original codebook"
+    assert codebook_snapshot.read_text() == "## A\noriginal codebook"
     assert codebook_snapshot.parent.name == "codebooks"
 
 
@@ -219,6 +219,24 @@ def test_run_candidate_rejects_non_markdown_codebook_before_model_call(tmp_path)
                           {"streams": [{"name": "s", "codebook": str(private)}]})
         run.assert_not_called()
     assert not (tmp_path / "out/candidate_001/codebooks/0_private.csv").exists()
+
+
+def test_run_candidate_rejects_codebook_mapping_mismatch_before_model_call(tmp_path):
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    (prompts / "system.txt").write_text("safe")
+    codebook = tmp_path / "codes.md"
+    codebook.write_text("## Wrong")
+    args = SimpleNamespace(output_dir=str(tmp_path / "out"), prompt_dir=str(prompts),
+                           input="unused.csv", id_column="UserID", batch_size=1,
+                           max_output_tokens=None, provider=None, model=None, base_url=None,
+                           temperature=None, comment_column="Comment", target_kappa=0.6)
+    reference = pd.DataFrame({"UserID": ["1"], "Comment": ["a"], "A": [1]})
+    with patch("survey_coder.auto_research.subprocess.run") as run:
+        with pytest.raises(ValueError, match="Codebook codes do not match reference columns"):
+            run_candidate(args, {}, 1, {"1"}, reference,
+                          {"streams": [{"name": "s", "codebook": str(codebook)}]})
+        run.assert_not_called()
 
 
 def test_run_candidate_rejects_prompt_path_traversal(tmp_path):
