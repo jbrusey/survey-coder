@@ -232,7 +232,7 @@ def main():
     if args.provider in ("vllm", "openwebui") and not args.openai_base_url:
         raise ValueError(f"{args.provider} requires a base URL (set llm.base_url or pass --openai-base-url).")
     
-    df = load_data(args.input)
+    df = load_data(args.input, args.id_column)
     
     # Handle ID column
     id_col = args.id_column
