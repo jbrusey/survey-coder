@@ -137,6 +137,17 @@ def test_evaluate_constant_disagreement_has_zero_kappa():
             per_code["stream_A"]["model_positive"]) == (2, 2)
 
 
+def test_evaluate_detailed_reports_undefined_for_constant_perfect_labels():
+    reference = pd.DataFrame({"UserID": ["1", "2"], "Comment": ["a", "b"], "A": [0, 0]})
+    coded = pd.DataFrame({"UserID": ["1", "2"], "stream_A": [0, 0]})
+    kappa, _, _, per_code = evaluate_detailed(
+        coded, reference, [{"name": "stream"}], {"1", "2"}, "UserID")
+    assert kappa is None
+    assert per_code["stream_A"]["kappa"] is None
+    assert per_code["stream_A"]["human_negative"] == 2
+    assert per_code["stream_A"]["model_negative"] == 2
+
+
 def test_evaluate_counts_nonbinary_predictions_as_missing():
     reference = pd.DataFrame({"UserID": ["1", "2"], "Comment": ["a", "b"], "A": [1, 0]})
     coded = pd.DataFrame({"UserID": ["1", "2"], "stream_A": [1, 2]})
