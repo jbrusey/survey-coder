@@ -277,6 +277,8 @@ def run_candidate(args: argparse.Namespace, candidate: dict[str, Any], index: in
 
 def main() -> None:
     args = parse_args()
+    if args.batch_size < 1:
+        raise ValueError("--batch-size must be a positive integer")
     input_df, reference = read_frame(args.input), read_frame(args.reference)
     validate_benchmark_frames(input_df, reference, args.id_column, args.comment_column,
                               allow_reference_subset=args.train_only)

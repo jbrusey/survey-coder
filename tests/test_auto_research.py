@@ -14,6 +14,14 @@ from survey_coder.auto_research import (eligible_ids, evaluate, evaluate_detaile
                                         validate_benchmark_frames)
 
 
+def test_main_rejects_nonpositive_batch_size_before_reading_inputs():
+    argv = ["auto-research", "--input", "missing.csv", "--reference", "missing.csv",
+            "--config", "missing.json", "--candidates", "missing.json",
+            "--output-dir", "unused", "--batch-size", "0"]
+    with patch.object(sys, "argv", argv), pytest.raises(ValueError, match="batch-size"):
+        main()
+
+
 def test_validate_benchmark_frames_checks_columns_and_ids():
     frame = pd.DataFrame({"UserID": ["1", "2"], "Comment": ["a", "b"]})
     validate_benchmark_frames(frame, frame.copy(), "UserID", "Comment")
