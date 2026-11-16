@@ -99,6 +99,13 @@ def test_goal_check_rejects_out_of_range_kappa(tmp_path):
     assert checked.returncode == 1
 
 
+def test_goal_check_rejects_missing_question_result(tmp_path):
+    write_final_result(tmp_path, "question_1", 100, 0)
+    checked = subprocess.run([str(CHECK)], cwd=tmp_path, capture_output=True, text=True)
+    assert checked.returncode == 1
+    assert "SCORE: 70" in checked.stdout
+
+
 def test_goal_check_requires_threshold_and_coverage(tmp_path):
     write_final_result(tmp_path, "question_1", 79, 21)
     write_final_result(tmp_path, "question_2", 100, 0)
