@@ -274,6 +274,11 @@ def test_final_validation_uses_selected_prompt_snapshot(tmp_path, capsys):
         tmp_path / "out/candidate_001/prompts")
     outcome = json.loads((tmp_path / "out/final_result.json").read_text())
     assert outcome["success"] is True
+    assert outcome["provider"] == "openai"
+    assert outcome["model"] == "gpt-4o-mini"
+    assert outcome["temperature"] == 0.25
+    assert outcome["max_output_tokens"] is None
+    assert outcome["batch_size"] == 25
     assert outcome["evaluated_cells"] == 2
     assert outcome["per_code"]["s_A"]["kappa"] == 1.0
     assert outcome["per_code"]["s_A"]["eligible_cells"] == 2

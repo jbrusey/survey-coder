@@ -364,13 +364,15 @@ def main() -> None:
     input_holdout.to_csv(holdout_input_path, index=False)
     coded_holdout_path = final_dir / "holdout_coded.csv"
     best_config = Path(best["config"])
+    best_config_data = json.loads(best_config.read_text())
+    effective_llm = best_config_data.get("llm", {})
     selected_prompt = str(Path(args.output_dir) / f"candidate_{best['candidate']:03d}" / "prompts")
     cmd = [sys.executable, "-m", "survey_coder.apply_codebooks", "--input", str(holdout_input_path),
            "--config", str(best_config), "--output", str(coded_holdout_path), "--id-column", args.id_column,
            "--batch-size", str(args.batch_size), "--prompt-dir", selected_prompt]
     if args.max_output_tokens:
         cmd += ["--max-output-tokens", str(args.max_output_tokens)]
-    cmd += ["--temperature", str(json.loads(best_config.read_text()).get("llm", {}).get("temperature", 0.0))]
+    cmd += ["--temperature", str(effective_llm.get("temperature", 0.0))]
     started = time.monotonic()
     reason = None
     per_code = {}
@@ -383,7 +385,7 @@ def main() -> None:
         if proc.returncode == 0 and coded_holdout_path.exists():
             final_kappa, cells, missing, per_code = evaluate_detailed(
                 read_frame(str(coded_holdout_path), args.id_column), reference,
-                json.loads(best_config.read_text())["streams"], holdout_ids,
+                best_config_data["streams"], holdout_ids,
                 args.id_column, args.comment_column)
         else:
             cells, missing = 0, len(holdout_ids)
@@ -404,6 +406,11 @@ def main() -> None:
                "holdout_rows": len(holdout_ids), "evaluated_cells": cells,
                "missing_predictions": missing,
                "prediction_coverage": round(prediction_coverage(cells, missing), 4),
+               "provider": effective_llm.get("provider", "openai"),
+               "model": effective_llm.get("model", "gpt-4o-mini"),
+               "temperature": effective_llm.get("temperature", 0.0),
+               "max_output_tokens": effective_llm.get("max_output_tokens"),
+               "batch_size": args.batch_size,
                "per_code": per_code, "reason": reason}
     (out / "final_result.json").write_text(json.dumps(outcome, indent=2), encoding="utf-8")
     print(json.dumps({k: outcome[k] for k in (
