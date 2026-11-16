@@ -204,7 +204,7 @@ def test_final_validation_uses_selected_prompt_snapshot(tmp_path):
     frame.to_csv(tmp_path / "input.csv", index=False)
     frame.assign(A=[1, 0, 1, 0]).to_csv(tmp_path / "reference.csv", index=False)
     (tmp_path / "config.json").write_text(json.dumps({"streams": [{"name": "s", "codebook": str(codebook)}]}))
-    (tmp_path / "candidates.json").write_text('[{}]')
+    (tmp_path / "candidates.json").write_text('[{"llm":{"temperature":0.25}}]')
     argv = ["auto-research", "--input", str(tmp_path / "input.csv"), "--reference",
             str(tmp_path / "reference.csv"), "--config", str(tmp_path / "config.json"),
             "--candidates", str(tmp_path / "candidates.json"), "--output-dir", str(tmp_path / "out"),
@@ -221,6 +221,7 @@ def test_final_validation_uses_selected_prompt_snapshot(tmp_path):
     ):
         main()
     assert len(commands) == 2
+    assert all(command[command.index("--temperature") + 1] == "0.25" for command in commands)
     assert commands[1][commands[1].index("--prompt-dir") + 1] == str(
         tmp_path / "out/candidate_001/prompts")
     outcome = json.loads((tmp_path / "out/final_result.json").read_text())

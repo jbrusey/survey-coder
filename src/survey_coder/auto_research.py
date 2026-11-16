@@ -242,6 +242,7 @@ def run_candidate(args: argparse.Namespace, candidate: dict[str, Any], index: in
            "--batch-size", str(args.batch_size), "--prompt-dir", prompt_path]
     if args.max_output_tokens:
         cmd += ["--max-output-tokens", str(args.max_output_tokens)]
+    cmd += ["--temperature", str(candidate_config.get("llm", {}).get("temperature", 0.0))]
     started = time.monotonic()
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -358,6 +359,7 @@ def main() -> None:
            "--batch-size", str(args.batch_size), "--prompt-dir", selected_prompt]
     if args.max_output_tokens:
         cmd += ["--max-output-tokens", str(args.max_output_tokens)]
+    cmd += ["--temperature", str(json.loads(best_config.read_text()).get("llm", {}).get("temperature", 0.0))]
     started = time.monotonic()
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     elapsed = time.monotonic() - started

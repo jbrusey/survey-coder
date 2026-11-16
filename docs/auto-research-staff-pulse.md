@@ -11,7 +11,8 @@ configs, prompt snapshots, codebook snapshots, and coded data are retained under
 Start with the benchmark's question-specific input, reference, and config. Put
 candidate overrides in a JSON list; supported keys are `llm`, `config`,
 `codebooks` (mapping stream names to codebook paths), `streams`, and `prompts`
-(mapping prompt filenames to full replacement text).
+(mapping prompt filenames to full replacement text). The effective LLM temperature
+is passed to both development and final-validation coding runs.
 
 ```bash
 uv run python -m survey_coder.auto_research \
