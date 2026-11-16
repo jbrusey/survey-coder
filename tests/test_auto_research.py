@@ -267,6 +267,7 @@ def test_final_validation_uses_selected_prompt_snapshot(tmp_path, capsys):
     assert outcome["per_code"]["s_A"]["kappa"] == 1.0
     assert outcome["per_code"]["s_A"]["eligible_cells"] == 2
     final_line = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert final_line["holdout_rows"] == 2
     assert final_line["evaluated_cells"] == 2
     assert final_line["missing_predictions"] == 0
     assert final_line["prediction_coverage"] == 1.0
