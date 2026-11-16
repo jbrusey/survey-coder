@@ -43,7 +43,7 @@ def parse_args():
     parser.add_argument("--max-output-tokens", type=int, default=None,
                         help="Maximum output tokens per request (default: provider/server default)")
     parser.add_argument("--batch-size", type=int, default=5, help="Number of comments per coding batch")
-    parser.add_argument("--temperature", type=float, default=0.0, help="LLM temperature (0.0 for deterministic coding)")
+    parser.add_argument("--temperature", type=float, default=None, help="LLM temperature (overrides config)")
     parser.add_argument("--max-rows", type=int, default=None, help="Limit number of rows to process (for testing)")
     parser.add_argument("--diagnostic-log", help="Append prompts, responses, and errors as JSONL (contains survey comments)")
     return parser.parse_args()
@@ -224,6 +224,8 @@ def main():
     base_url_env = base_url_environment_name(args.provider)
     args.openai_base_url = (args.openai_base_url or llm.get("base_url")
                             or (os.environ.get(base_url_env) if base_url_env else None))
+    if args.temperature is None:
+        args.temperature = llm.get("temperature", 0.0)
     if args.max_output_tokens is None:
         args.max_output_tokens = llm.get("max_output_tokens")
     args.think = llm.get("think")

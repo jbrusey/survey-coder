@@ -1,4 +1,5 @@
 import json
+import sys
 import tempfile
 import unittest
 from argparse import Namespace
@@ -7,10 +8,34 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 
+from survey_coder import apply_codebooks
 from survey_coder.apply_codebooks import add_code_columns, call_llm, process_stream
 
 
 class ApplyCodebooksProviderTests(unittest.TestCase):
+    @patch("survey_coder.apply_codebooks.process_stream", return_value=({}, []))
+    @patch("survey_coder.apply_codebooks.load_prompt", return_value="prompt")
+    @patch("survey_coder.apply_codebooks.load_data")
+    @patch("survey_coder.apply_codebooks.load_config")
+    def test_config_temperature_is_used_unless_cli_overrides(
+        self, load_config, load_data, _load_prompt, process_stream
+    ):
+        load_config.return_value = {
+            "llm": {"temperature": 0.4}, "streams": [{"name": "Q1"}], "context": ""
+        }
+        load_data.return_value = pd.DataFrame([{"ID": "R1", "Comment": "text"}])
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "coded.csv"
+            with patch.object(sys, "argv", ["apply_codebooks", "--input", "in.csv",
+                                             "--output", str(output), "--config", "config.json"]):
+                apply_codebooks.main()
+            self.assertEqual(process_stream.call_args.args[3].temperature, 0.4)
+            with patch.object(sys, "argv", ["apply_codebooks", "--input", "in.csv",
+                                             "--output", str(output), "--config", "config.json",
+                                             "--temperature", "0.2"]):
+                apply_codebooks.main()
+            self.assertEqual(process_stream.call_args.args[3].temperature, 0.2)
+
     @patch("survey_coder.apply_codebooks.OpenAI")
     def test_openai_compatible_request_uses_configured_thinking_and_json_mode(self, openai):
         openai.return_value.chat.completions.create.return_value = Mock(
