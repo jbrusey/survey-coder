@@ -13,6 +13,13 @@ from survey_coder.apply_codebooks import add_code_columns, call_llm, process_str
 
 
 class ApplyCodebooksProviderTests(unittest.TestCase):
+    @patch("survey_coder.apply_codebooks.load_config", return_value={"llm": {"temperature": float("nan")}})
+    def test_nonfinite_config_temperature_is_rejected_before_coding(self, _load_config):
+        with patch.object(sys, "argv", ["apply_codebooks", "--input", "in.csv",
+                                         "--output", "out.csv"]):
+            with self.assertRaisesRegex(ValueError, "temperature must be finite and nonnegative"):
+                apply_codebooks.main()
+
     @patch("survey_coder.apply_codebooks.process_stream", return_value=({}, []))
     @patch("survey_coder.apply_codebooks.load_prompt", return_value="prompt")
     @patch("survey_coder.apply_codebooks.load_data")
