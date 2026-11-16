@@ -9,7 +9,7 @@ from survey_coder.config import load_config
 class ConfigTests(unittest.TestCase):
     def test_temperature_must_be_finite_nonnegative_number(self):
         base = {"streams": [{"name": "Q1", "column": "Comment", "question": "Q?"}]}
-        for temperature in (-0.1, float("nan"), float("inf"), True, "0.2"):
+        for temperature in (-0.1, float("nan"), float("inf"), 10**1000, True, "0.2"):
             with self.subTest(temperature=temperature), tempfile.TemporaryDirectory() as directory:
                 config = {**base, "llm": {"temperature": temperature}}
                 path = Path(directory) / "config.json"
