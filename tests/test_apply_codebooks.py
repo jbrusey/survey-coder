@@ -48,12 +48,13 @@ class ApplyCodebooksProviderTests(unittest.TestCase):
         openai.return_value.chat.completions.create.return_value = Mock(
             choices=[Mock(finish_reason="stop", message=Mock(content='{"results": []}'))])
 
-        call_llm("prompt", "system", "qwen3.8:latest", 0,
+        call_llm("prompt", "system", "qwen3.8:latest", 0.4,
                  "http://localhost:11434/v1", think=False)
 
         request = openai.return_value.chat.completions.create.call_args.kwargs
         self.assertEqual(request["extra_body"], {"think": False})
         self.assertEqual(request["response_format"], {"type": "json_object"})
+        self.assertEqual(request["temperature"], 0.4)
 
     @patch("survey_coder.apply_codebooks.OpenAI")
     def test_json_mode_can_be_disabled(self, openai):
