@@ -334,7 +334,7 @@ def main():
             sys.exit(1)
 
     try:
-        df = load_data(args.input)
+        df = load_data(args.input, args.id_column)
         streams = config["streams"]
         validate_columns(df, streams)
         df, id_col = ensure_id_column(df, args.id_column)
