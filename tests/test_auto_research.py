@@ -221,6 +221,8 @@ def test_final_validation_uses_selected_prompt_snapshot(tmp_path):
     outcome = json.loads((tmp_path / "out/final_result.json").read_text())
     assert outcome["success"] is True
     assert outcome["evaluated_cells"] == 2
+    assert outcome["per_code"]["s_A"]["kappa"] == 1.0
+    assert outcome["per_code"]["s_A"]["eligible_cells"] == 2
 
 
 def test_run_candidate_rejects_non_markdown_codebook_before_model_call(tmp_path):
