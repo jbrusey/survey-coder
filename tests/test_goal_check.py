@@ -2,6 +2,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 CHECK = Path(__file__).resolve().parents[1] / "check.sh"
 
@@ -57,6 +59,18 @@ def test_goal_check_rejects_unsuccessful_final_result(tmp_path):
     path = tmp_path / "outputs/staff_pulse/auto_research/question_2/final_result.json"
     result = json.loads(path.read_text())
     result["success"] = False
+    path.write_text(json.dumps(result))
+    checked = subprocess.run([str(CHECK)], cwd=tmp_path, capture_output=True, text=True)
+    assert checked.returncode == 1
+
+
+@pytest.mark.parametrize("kappa", [float("nan"), float("inf"), float("-inf")])
+def test_goal_check_rejects_nonfinite_kappa(tmp_path, kappa):
+    write_final_result(tmp_path, "question_1", 100, 0)
+    write_final_result(tmp_path, "question_2", 100, 0)
+    path = tmp_path / "outputs/staff_pulse/auto_research/question_1/final_result.json"
+    result = json.loads(path.read_text())
+    result["kappa"] = kappa
     path.write_text(json.dumps(result))
     checked = subprocess.run([str(CHECK)], cwd=tmp_path, capture_output=True, text=True)
     assert checked.returncode == 1
