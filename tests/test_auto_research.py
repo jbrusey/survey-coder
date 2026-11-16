@@ -285,6 +285,24 @@ def test_main_rejects_non_object_candidates_before_model_calls(tmp_path):
         run_candidate.assert_not_called()
 
 
+def test_main_rejects_nonpositive_candidate_limit_before_model_calls(tmp_path):
+    frame = pd.DataFrame({"UserID": ["1", "2"], "Comment": ["a", "b"]})
+    frame.to_csv(tmp_path / "input.csv", index=False)
+    frame.assign(A=[1, 0]).to_csv(tmp_path / "reference.csv", index=False)
+    (tmp_path / "config.json").write_text(json.dumps({"streams": [{"name": "s"}]}))
+    (tmp_path / "candidates.json").write_text('[{}]')
+    argv = ["auto-research", "--input", str(tmp_path / "input.csv"), "--reference",
+            str(tmp_path / "reference.csv"), "--config", str(tmp_path / "config.json"),
+            "--candidates", str(tmp_path / "candidates.json"), "--output-dir",
+            str(tmp_path / "out"), "--train-rows", "1", "--limit", "0"]
+    with patch.object(sys, "argv", argv), patch(
+        "survey_coder.auto_research.run_candidate"
+    ) as run_candidate:
+        with pytest.raises(ValueError, match="--limit must be a positive integer"):
+            main()
+        run_candidate.assert_not_called()
+
+
 def test_main_rejects_invalid_train_rows_before_model_calls(tmp_path):
     frame = pd.DataFrame({"UserID": ["1", "2"], "Comment": ["a", "b"]})
     frame.to_csv(tmp_path / "input.csv", index=False)

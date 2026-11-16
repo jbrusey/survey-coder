@@ -245,7 +245,9 @@ def main() -> None:
         raise ValueError("Candidate manifest must be a non-empty JSON list")
     if any(not isinstance(candidate, dict) for candidate in candidates):
         raise ValueError("Each candidate must be a JSON object")
-    if args.limit:
+    if args.limit is not None:
+        if args.limit < 1:
+            raise ValueError("--limit must be a positive integer")
         candidates = candidates[:args.limit]
     all_ids = input_df[args.id_column].astype(str).tolist()
     if not 0 < args.train_rows < len(all_ids):
