@@ -1,0 +1,24 @@
+# Fresh validation protocol
+
+The original 200-row holdout for each staff-pulse question has been evaluated and must not be reused for candidate selection or tuning. The current Qwen2.5-Coder candidate did not meet κ ≥ 0.60. This protocol defines the next valid evaluation set; it does not create or relabel data.
+
+## Data required
+
+For each question, provide a newly sampled, representative set of at least 400 comments with:
+
+- An input CSV with unique IDs and `Comment`.
+- A separate reference CSV with matching IDs, `Comment`, and the existing binary/blank code columns. For each ID, comments must match; blank, `D/A`, and `N/A` are treated as equivalent missing responses.
+- Human coding completed independently of model predictions. Keep the holdout labels inaccessible to candidate authors until final scoring.
+- A documented sampling frame, date, inclusion/exclusion rules, and coder/adjudication process.
+
+Shuffle before splitting. Use the first 200 IDs as development and the remaining rows as a sealed holdout. Exclude blank/D/A/N/A comments consistently. Do not copy rows from the consumed benchmark holdout into the replacement set.
+
+## Run and record
+
+1. Confirm ID alignment, uniqueness, code columns, and at least one eligible row in both partitions.
+2. Iterate model/prompt/codebook candidates using `auto-research --train-only` on the development partition. Preserve manifests and artifacts.
+3. Select one candidate before exposing holdout labels. Run the ordinary auto-research command once per question to score the holdout.
+4. Report pooled binary-cell Cohen's κ, evaluated cells, missing predictions, model/provider/endpoint, exact prompt/codebook, and commands. Undefined κ or fewer than 80% of eligible cells predicted is failure; always report missingness separately.
+5. Do not revise a candidate based on this holdout. Any further iteration requires another untouched validation set.
+
+Example input/reference paths and the correct approval for using a new sample must be supplied by the data owner; do not fabricate data or labels.

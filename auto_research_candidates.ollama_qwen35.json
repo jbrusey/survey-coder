@@ -1,0 +1,10 @@
+[
+  {
+    "llm": {
+      "provider": "openai",
+      "model": "qwen3.5:latest",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "think": false
+    }
+  }
+]

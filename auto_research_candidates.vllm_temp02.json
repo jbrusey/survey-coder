@@ -1,0 +1,10 @@
+[
+  {
+    "llm": {
+      "provider": "vllm",
+      "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+      "base_url": "http://100.101.42.121:8000/v1",
+      "temperature": 0.2
+    }
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "current-baseline",
+    "description": "Use the current config, codebooks, and prompts as the first benchmark."
+  },
+  {
+    "name": "more-reasoning",
+    "description": "Example: switch to a stronger model/provider through a config override.",
+    "llm": {
+      "provider": "openai",
+      "model": "REPLACE_WITH_AVAILABLE_MODEL"
+    }
+  }
+]
