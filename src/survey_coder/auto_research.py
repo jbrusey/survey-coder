@@ -154,7 +154,8 @@ def evaluate_detailed(coded: pd.DataFrame, reference: pd.DataFrame, streams: lis
                 per_code[pred_column] = {"kappa": None, "eligible_cells": len(left),
                                          "evaluated_cells": 0, "missing_predictions": len(left),
                                          "human_positive": int(true.sum()),
-                                         "model_positive": 0}
+                                         "human_negative": len(left) - int(true.sum()),
+                                         "model_positive": 0, "model_negative": 0}
                 continue
             pred = pd.to_numeric(left[pred_column], errors="coerce")
             # Human blanks mean zero only for eligible respondents.
@@ -173,7 +174,8 @@ def evaluate_detailed(coded: pd.DataFrame, reference: pd.DataFrame, streams: lis
                 "kappa": float(code_kappa) if code_kappa is not None else None,
                 "eligible_cells": len(left), "evaluated_cells": len(code_true),
                 "missing_predictions": missing_count,
-                "human_positive": int(true.sum()), "model_positive": int(sum(code_pred))}
+                "human_positive": int(true.sum()), "human_negative": len(left) - int(true.sum()),
+                "model_positive": int(sum(code_pred)), "model_negative": len(code_pred) - int(sum(code_pred))}
     all_labels_same = human_cells and len(set(human_cells + model_cells)) == 1
     kappa = cohen_kappa_score(human_cells, model_cells) if human_cells and not all_labels_same else None
     if kappa is not None and not math.isfinite(float(kappa)):

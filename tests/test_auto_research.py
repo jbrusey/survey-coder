@@ -75,8 +75,8 @@ def test_evaluate_detailed_reports_per_code_support_and_missing_predictions():
     assert (kappa, cells, missing) == (1.0, 2, 1)
     assert per_code["stream_A"] == {"kappa": 1.0, "eligible_cells": 3,
                                     "evaluated_cells": 2, "missing_predictions": 1,
-                                    "human_positive": 1,
-                                    "model_positive": 1}
+                                    "human_positive": 1, "human_negative": 2,
+                                    "model_positive": 1, "model_negative": 1}
 
 
 def test_evaluate_honors_custom_comment_column():
@@ -152,7 +152,8 @@ def test_evaluate_counts_entirely_missing_prediction_column():
         coded, reference, [{"name": "stream"}], {"1", "2"}, "UserID")
     assert per_code["stream_A"] == {"kappa": None, "eligible_cells": 2,
                                     "evaluated_cells": 0, "missing_predictions": 2,
-                                    "human_positive": 1, "model_positive": 0}
+                                    "human_positive": 1, "human_negative": 1,
+                                    "model_positive": 0, "model_negative": 0}
 
 
 def test_minimum_coverage_gate():
