@@ -12,7 +12,9 @@ Start with the benchmark's question-specific input, reference, and config. Put
 candidate overrides in a JSON list; supported keys are `llm`, `config`,
 `codebooks` (mapping stream names to codebook paths), `streams`, and `prompts`
 (mapping prompt filenames to full replacement text). The effective LLM temperature
-is passed to both development and final-validation coding runs.
+is passed to both development and final-validation coding runs. Candidate temperatures
+must be finite and nonnegative; `--target-kappa` must be finite in `[0, 1]`, and
+`--batch-size` must be positive.
 
 ```bash
 uv run python -m survey_coder.auto_research \
