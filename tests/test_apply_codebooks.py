@@ -104,10 +104,13 @@ class CodeColumnTests(unittest.TestCase):
             "ID", "Comment", "Pos_Helpful", "Pos_Clear", "Pos_Codes_Applied",
             "Imp_Pace", "Imp_Codes_Applied",
         ])
-        self.assertEqual(coded[["Pos_Helpful", "Pos_Clear", "Imp_Pace"]].values.tolist(),
-                         [[1, 1, 0], [0, 1, 1]])
+        self.assertEqual(coded[["Pos_Helpful", "Pos_Clear"]].values.tolist(),
+                         [[1, 1], [0, 1]])
+        self.assertTrue(pd.isna(coded.loc[0, "Imp_Pace"]))
+        self.assertEqual(coded.loc[1, "Imp_Pace"], 1)
         self.assertEqual(coded["Pos_Codes_Applied"].tolist(), ["Helpful, Clear", "Clear"])
-        self.assertEqual(coded["Imp_Codes_Applied"].tolist(), ["", "Pace"])
+        self.assertTrue(pd.isna(coded.loc[0, "Imp_Codes_Applied"]))
+        self.assertEqual(coded.loc[1, "Imp_Codes_Applied"], "Pace")
 
     def test_many_code_columns_do_not_emit_fragmentation_warning(self):
         frame = pd.DataFrame({"ID": ["R1"]})

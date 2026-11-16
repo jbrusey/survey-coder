@@ -1,0 +1,34 @@
+{
+    "context": "Coventry University Group staff pulse survey feedback",
+      "llm": {
+    "provider": "openai",
+	  "model": "gemma4:latest",
+	  "base_url": "http://localhost:11434/v1",
+	  "thinking": false,
+    "max_output_tokens": 32768
+  },
+  "analysis": {
+    "output_dir": "outputs/staff_pulse_ornith",
+    "prompt_dir": "prompts",
+    "batch_size": 5,
+    "sample_size": 1000,
+    "min_length": 5,
+    "temperature": 0.0
+  },
+  "streams": [
+    {
+      "name": "Proud",
+      "column": "proud_COMMENTS_QPResp",
+      "question": "I feel proud working for CUG",
+      "codebook": "codebooks/staff_pulse_proud.md",
+      "prefix": "Proud"
+    },
+    {
+      "name": "Recommend",
+      "column": "recommend_COMMENTS_QPResp",
+      "question": "I would recommend Coventry University Group as a good place to work.",
+      "codebook": "codebooks/staff_pulse_recommend.md",
+      "prefix": "Recommend"
+    }
+  ]
+}

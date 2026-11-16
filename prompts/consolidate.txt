@@ -6,7 +6,8 @@ Rules:
 - Merge duplicate or near-duplicate themes while preserving important distinctions.
 - Remove weak themes with little support.
 - Produce no more than {max_final_codes} codes.
-- Include an "Unclear / vague" code and an "Other" code.
+- Include only codes supported by recurring themes in the comments. Do not add "Unclear / vague", "Other", or any other placeholder or catch-all code unless that item is explicitly included in the supplied candidate themes.
+- Use only code items drawn from the supplied candidate themes; do not invent additional codebook items.
 - Ensure codes are suitable for row-level multi-label coding.
 - Produce clear include/exclude rules and example evidence phrases.
 - Return valid JSON only.

@@ -137,10 +137,10 @@ def process_stream(df: pd.DataFrame, stream: Dict, id_col: str, args: argparse.N
     mask = df[comment_col].notna() & (df[comment_col].astype(str).str.strip().str.len() > 0)
     rows_to_process = df[mask].to_dict('records')
     
-    if args.max_rows:
+    if args.max_rows is not None:
         rows_to_process = rows_to_process[:args.max_rows]
     
-    results_map = {} # id -> list of codes
+    results_map = {} # successfully returned ID -> list of codes
     
     batches = [rows_to_process[i:i + args.batch_size] for i in range(0, len(rows_to_process), args.batch_size)]
     
@@ -202,10 +202,16 @@ def add_code_columns(df: pd.DataFrame, id_col: str,
     response_ids = df[id_col]
     for stream, result_map, codes in results:
         prefix = stream.get("prefix", stream["name"])
-        applied_codes = response_ids.map(lambda value: result_map.get(value, []))
+        # Only mark rows with a returned result as coded. Missing IDs include
+        # rows excluded by --max-rows and rows in failed/incomplete batches.
+        applied_codes = response_ids.map(result_map)
         for code in codes:
-            output_columns[f"{prefix}_{code}"] = applied_codes.map(lambda values, code=code: int(code in values))
-        output_columns[f"{prefix}_Codes_Applied"] = applied_codes.map(lambda values: ", ".join(values))
+            output_columns[f"{prefix}_{code}"] = applied_codes.map(
+                lambda values, code=code: int(code in values) if isinstance(values, list) else pd.NA
+            ).astype("Int64")
+        output_columns[f"{prefix}_Codes_Applied"] = applied_codes.map(
+            lambda values: ", ".join(values) if isinstance(values, list) else pd.NA
+        )
     return pd.concat([df, pd.DataFrame(output_columns, index=df.index)], axis=1)
 
 def main():

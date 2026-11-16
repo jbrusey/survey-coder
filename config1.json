@@ -1,0 +1,22 @@
+{
+  "context": "student survey feedback",
+  "streams": [
+    {
+      "name": "Comment1Positive",
+      "column": "Comment1Positive",
+      "question": "what is positive",
+      "prefix": "Comment1Positive"
+    },
+    {
+      "name": "Comment1Improvement",
+      "column": "Comment1Improvement",
+      "question": "what needs improvement",
+      "prefix": "Comment1Improvement"
+    }
+  ],
+  "llm": {
+    "provider": "vllm",
+    "model": "Qwen/Qwen3.5-9B",
+    "base_url": "http://100.101.42.121:8000/v1"
+  }
+}
