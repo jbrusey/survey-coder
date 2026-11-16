@@ -115,7 +115,8 @@ The config contains a `streams` list and can optionally hold reusable LLM defaul
   "llm": {
     "provider": "vllm",
     "model": "Qwen/Qwen3.5-9B",
-    "base_url": "https://your-vllm-host.example/v1"
+    "base_url": "https://your-vllm-host.example/v1",
+    "temperature": 0.0
   },
   "streams": [
     {"name": "Teaching", "column": "TeachingComment", "question": "What did you think of the teaching?", "codebook": "outputs/teaching_codebook.md", "prefix": "Teaching"}
