@@ -3,7 +3,7 @@
 `auto-research` runs candidate codebook/prompt/model configurations against the
 first 200 rows for development, picks the best candidate by pooled binary-cell
 Cohen's kappa, and codes rows 201–400 once for final validation. The final output
-line is JSON containing only `success`, `seconds`, and `kappa`. Per-candidate logs,
+line is JSON with `success`, `seconds`, `kappa`, evaluated/missing cell counts, and prediction coverage. Per-candidate logs,
 configs, prompt snapshots, codebook snapshots, and coded data are retained under the output directory for auditability. The effective candidate list is saved as `candidates.json`. Candidate and final result JSON, console summaries, and candidate `summary.jsonl` include evaluated/missing cell counts and prediction coverage. Candidate/final result JSON also report per-code kappa, eligible/evaluated cells, human/model positive and negative counts, and missing predictions. Human counts use all eligible cells; model counts use only evaluated predictions. Candidate setup failures are recorded with a `reason` and do not stop later candidates. Final-validation exceptions are preserved as failed `final_result.json` records and appended to `stderr.log` without discarding subprocess diagnostics.
 
 ## Run

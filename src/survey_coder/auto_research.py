@@ -405,7 +405,9 @@ def main() -> None:
                "prediction_coverage": round(prediction_coverage(cells, missing), 4),
                "per_code": per_code, "reason": reason}
     (out / "final_result.json").write_text(json.dumps(outcome, indent=2), encoding="utf-8")
-    print(json.dumps({k: outcome[k] for k in ("success", "seconds", "kappa")}), flush=True)
+    print(json.dumps({k: outcome[k] for k in (
+        "success", "seconds", "kappa", "evaluated_cells", "missing_predictions",
+        "prediction_coverage")}), flush=True)
 
 
 if __name__ == "__main__":
