@@ -300,6 +300,39 @@ def test_final_validation_failure_is_written_as_failed_result(tmp_path, failure,
         assert (tmp_path / "out/final_validation/stderr.log").read_text() == reason
 
 
+def test_final_evaluation_error_preserves_subprocess_stderr(tmp_path):
+    frame = pd.DataFrame({"UserID": ["1", "2", "3", "4"], "Comment": list("abcd")})
+    frame.to_csv(tmp_path / "input.csv", index=False)
+    frame.assign(A=[1, 0, 1, 0]).to_csv(tmp_path / "reference.csv", index=False)
+    (tmp_path / "config.json").write_text('{"streams":[{"name":"s"}]}')
+    (tmp_path / "candidates.json").write_text('[{}]')
+    argv = ["auto-research", "--input", str(tmp_path / "input.csv"), "--reference",
+            str(tmp_path / "reference.csv"), "--config", str(tmp_path / "config.json"),
+            "--candidates", str(tmp_path / "candidates.json"), "--output-dir",
+            str(tmp_path / "out"), "--train-rows", "2"]
+
+    def candidate_result(*args):
+        candidate_dir = tmp_path / "out/candidate_001"
+        candidate_dir.mkdir(parents=True)
+        config_path = candidate_dir / "config.json"
+        config_path.write_text('{"streams":[{"name":"s"}]}')
+        return {"candidate": 1, "success": True, "seconds": 0, "kappa": 1.0,
+                "evaluated_cells": 2, "missing_predictions": 0, "config": str(config_path)}
+
+    def malformed_output(command, **kwargs):
+        output = command[command.index("--output") + 1]
+        pd.DataFrame({"UserID": ["3", "3"], "s_A": [0, 1]}).to_csv(output, index=False)
+        return SimpleNamespace(returncode=0, stdout="", stderr="preserve this diagnostic")
+
+    with patch.object(sys, "argv", argv), patch(
+        "survey_coder.auto_research.run_candidate", side_effect=candidate_result
+    ), patch("survey_coder.auto_research.subprocess.run", side_effect=malformed_output):
+        main()
+    stderr = (tmp_path / "out/final_validation/stderr.log").read_text()
+    assert "preserve this diagnostic" in stderr
+    assert "one-to-one" in stderr
+
+
 def test_run_candidate_rejects_non_markdown_codebook_before_model_call(tmp_path):
     prompts = tmp_path / "prompts"
     prompts.mkdir()
