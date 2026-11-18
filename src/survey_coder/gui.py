@@ -155,6 +155,8 @@ def run_pipeline(settings: dict, operation: str) -> str:
         model=settings["model"], provider=settings["provider"],
         openai_base_url=settings["base_url"], temperature=settings["temperature"],
         batch_size=settings["batch_size"], max_output_tokens=settings["max_output_tokens"],
+        think=None, json_mode=True, structured_output=False, ollama_native=False,
+        diagnostic_log=None,
     )
 
     if operation in ("generate", "both"):

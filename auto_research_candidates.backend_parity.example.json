@@ -1,0 +1,25 @@
+[
+  {
+    "name": "vllm-qwen25-coder-32b-structured",
+    "llm": {
+      "provider": "vllm",
+      "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+      "base_url": "http://100.101.42.121:8000/v1",
+      "max_output_tokens": 4096,
+      "temperature": 0.0,
+      "structured_output": true
+    }
+  },
+  {
+    "name": "ollama-qwen25-coder-32b-structured",
+    "llm": {
+      "provider": "openai",
+      "model": "qwen2.5-coder:32b",
+      "base_url": "http://localhost:11434",
+      "max_output_tokens": 4096,
+      "temperature": 0.0,
+      "ollama_native": true,
+      "structured_output": true
+    }
+  }
+]

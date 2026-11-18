@@ -33,7 +33,7 @@ Pride is tied to CUG's positive reputation or standing.
 Pride is tied to working in higher education as a sector.
 
 ## Staff treated poorly
-Says staff are treated badly or unfairly, with this given as a reason pride is reduced.
+Says staff are treated badly or unfairly. Note that this may be combined with positive elements, such as being proud of own work.
 
 ## Positive reputation
 Mentions CUG's good reputation or standing positively, without otherwise expressing pride.

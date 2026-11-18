@@ -102,7 +102,8 @@ class DiagnosticLogTests(unittest.TestCase):
             args = Namespace(
                 max_rows=None, batch_size=1, model="test", temperature=0,
                 openai_base_url=None, provider="openai", max_output_tokens=None,
-                think=None, json_mode=True, diagnostic_log=str(log_path),
+                think=None, json_mode=True, structured_output=False,
+                ollama_native=False, diagnostic_log=str(log_path),
             )
             prompts = {"system": "Code {stream_name}", "batch": "{comments}"}
             frame = pd.DataFrame([{"ID": "R1", "Comment": "A useful comment"}])
@@ -168,7 +169,8 @@ class UnknownCodeWarningTests(unittest.TestCase):
             args = Namespace(
                 max_rows=None, batch_size=1, model="test", temperature=0,
                 openai_base_url=None, provider="openai", max_output_tokens=None,
-                think=None, json_mode=True, diagnostic_log=None,
+                think=None, json_mode=True, structured_output=False,
+                ollama_native=False, diagnostic_log=None,
             )
             frame = pd.DataFrame([{"ID": "R1", "Comment": "A useful comment"}])
             prompts = {"system": "Code {stream_name}", "batch": "{comments}"}

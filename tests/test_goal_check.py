@@ -13,6 +13,7 @@ def write_final_result(root, question, evaluated, missing):
     out.mkdir(parents=True)
     (out / "final_result.json").write_text(json.dumps({
         "success": True,
+        "target_met": True,
         "kappa": 0.7,
         "evaluated_cells": evaluated,
         "missing_predictions": missing,
@@ -36,6 +37,17 @@ def test_goal_check_rejects_malformed_json(tmp_path):
     write_final_result(tmp_path, "question_2", 100, 0)
     path = tmp_path / "outputs/staff_pulse/auto_research/question_1/final_result.json"
     path.write_text("{not valid json")
+    checked = subprocess.run([str(CHECK)], cwd=tmp_path, capture_output=True, text=True)
+    assert checked.returncode == 1
+
+
+def test_goal_check_rejects_missing_target_met(tmp_path):
+    write_final_result(tmp_path, "question_1", 100, 0)
+    write_final_result(tmp_path, "question_2", 100, 0)
+    path = tmp_path / "outputs/staff_pulse/auto_research/question_1/final_result.json"
+    result = json.loads(path.read_text())
+    result.pop("target_met")
+    path.write_text(json.dumps(result))
     checked = subprocess.run([str(CHECK)], cwd=tmp_path, capture_output=True, text=True)
     assert checked.returncode == 1
 
@@ -134,8 +146,8 @@ def test_goal_check_requires_threshold_and_coverage(tmp_path):
     assert "SCORE: 70" in result.stdout
 
     (tmp_path / "outputs/staff_pulse/auto_research/question_1/final_result.json").write_text(
-        json.dumps({"success": True, "kappa": 0.7, "evaluated_cells": 80,
-                    "missing_predictions": 20})
+        json.dumps({"success": True, "target_met": True, "kappa": 0.7,
+                    "evaluated_cells": 80, "missing_predictions": 20})
     )
     result = subprocess.run([str(CHECK)], cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode == 0

@@ -25,6 +25,7 @@ apply-codebooks = "survey_coder.apply_codebooks:main"
 evaluate-results = "survey_coder.evaluate_results:main"
 evaluate-gemini = "survey_coder.evaluate_gemini:main"
 evaluate-ollama = "survey_coder.evaluate_ollama:main"
+auto-research = "survey_coder.auto_research:main"
 survey-coder-gui = "survey_coder.gui:main"
 
 [build-system]

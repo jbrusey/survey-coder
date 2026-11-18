@@ -23,7 +23,8 @@ for question in ("question_1", "question_2"):
                 continue
             value = float(raw_value)
             coverage = evaluated / (evaluated + missing)
-            if (result.get("success") is True and math.isfinite(value)
+            if (result.get("success") is True and result.get("target_met") is True
+                    and math.isfinite(value)
                     and -1 <= value <= 1 and coverage >= 0.8):
                 valid.append(value)
         except (OSError, ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError):

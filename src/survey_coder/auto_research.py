@@ -57,6 +57,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, help="Run only the first N candidates (for a smoke run)")
     parser.add_argument("--train-only", action="store_true",
                         help="Evaluate candidates on development rows only; do not code or score holdout rows")
+    parser.add_argument("--all-rows", action="store_true",
+                        help="In --train-only mode, score every supplied row (for curated challenge sets)")
     return parser.parse_args()
 
 
@@ -264,7 +266,8 @@ def run_candidate(args: argparse.Namespace, candidate: dict[str, Any], index: in
             coded, reference, streams, train_ids, args.id_column, args.comment_column)
         # A candidate is selected using training rows only. Holdout evaluation is
         # deliberately run only once, below, after selection.
-        result = {"candidate": index, "success": train_kappa is not None and train_kappa >= args.target_kappa
+        result = {"candidate": index, "success": True,
+                  "target_met": train_kappa is not None and train_kappa >= args.target_kappa
                   and has_minimum_coverage(train_cells, train_missing),
                   "seconds": round(elapsed, 2), "kappa": train_kappa,
                   "evaluated_cells": train_cells, "missing_predictions": train_missing,
@@ -281,6 +284,8 @@ def run_candidate(args: argparse.Namespace, candidate: dict[str, Any], index: in
 
 def main() -> None:
     args = parse_args()
+    if args.all_rows and not args.train_only:
+        raise ValueError("--all-rows requires --train-only")
     if args.batch_size < 1:
         raise ValueError("--batch-size must be a positive integer")
     if not math.isfinite(args.target_kappa) or not 0 <= args.target_kappa <= 1:
@@ -301,10 +306,14 @@ def main() -> None:
             raise ValueError("--limit must be a positive integer")
         candidates = candidates[:args.limit]
     all_ids = input_df[args.id_column].astype(str).tolist()
-    if not 0 < args.train_rows < len(all_ids):
+    if args.all_rows:
+        train_ids = set(all_ids)
+        holdout_ids = set()
+    elif not 0 < args.train_rows < len(all_ids):
         raise ValueError(f"--train-rows must be between 1 and {len(all_ids) - 1}")
-    train_ids = set(all_ids[:args.train_rows])
-    holdout_ids = set(all_ids[args.train_rows:])
+    else:
+        train_ids = set(all_ids[:args.train_rows])
+        holdout_ids = set(all_ids[args.train_rows:])
     reference_ids = set(reference[args.id_column].astype(str))
     if args.train_only and not reference_ids.issubset(train_ids):
         raise ValueError("--train-only reference must contain development IDs only")
@@ -333,19 +342,22 @@ def main() -> None:
         results.append(result)
         with summary_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({k: result.get(k) for k in (
-                "candidate", "success", "seconds", "kappa", "evaluated_cells",
+                "candidate", "success", "target_met", "seconds", "kappa", "evaluated_cells",
                 "missing_predictions", "prediction_coverage", "reason")}) + "\n")
         print(json.dumps({k: result.get(k) for k in (
-            "candidate", "success", "seconds", "kappa", "evaluated_cells",
+            "candidate", "success", "target_met", "seconds", "kappa", "evaluated_cells",
             "missing_predictions", "prediction_coverage", "reason")}), flush=True)
     viable = [result for result in results if result.get("kappa") is not None
               and has_minimum_coverage(result["evaluated_cells"], result["missing_predictions"])]
     if not viable:
-        print(json.dumps({"success": False, "seconds": sum(x["seconds"] for x in results), "kappa": None}))
+        print(json.dumps({"success": all(x.get("success") for x in results),
+                          "target_met": False,
+                          "seconds": sum(x["seconds"] for x in results), "kappa": None}))
         return
     best = max(viable, key=lambda item: item["kappa"])
     if args.train_only:
-        print(json.dumps({"success": best["kappa"] >= args.target_kappa
+        print(json.dumps({"success": all(x.get("success") for x in results),
+                          "target_met": best["kappa"] >= args.target_kappa
                           and has_minimum_coverage(best["evaluated_cells"], best["missing_predictions"]),
                           "seconds": sum(x["seconds"] for x in results),
                           "development_best_kappa": best["kappa"],
@@ -398,7 +410,8 @@ def main() -> None:
         previous_stderr = stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else ""
         stderr_path.write_text("\n".join(part for part in (previous_stderr.rstrip(), reason) if part),
                                encoding="utf-8")
-    outcome = {"success": final_kappa is not None and final_kappa >= args.target_kappa
+    outcome = {"success": reason is None and final_kappa is not None,
+               "target_met": final_kappa is not None and final_kappa >= args.target_kappa
                and has_minimum_coverage(cells, missing),
                "seconds": round(sum(x["seconds"] for x in results) + elapsed, 2),
                "kappa": final_kappa, "target_kappa": args.target_kappa,
@@ -414,7 +427,7 @@ def main() -> None:
                "per_code": per_code, "reason": reason}
     (out / "final_result.json").write_text(json.dumps(outcome, indent=2), encoding="utf-8")
     print(json.dumps({k: outcome[k] for k in (
-        "success", "seconds", "kappa", "holdout_rows", "evaluated_cells",
+        "success", "target_met", "seconds", "kappa", "holdout_rows", "evaluated_cells",
         "missing_predictions", "prediction_coverage")}), flush=True)
 
 

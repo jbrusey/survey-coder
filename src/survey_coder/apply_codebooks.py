@@ -6,6 +6,8 @@ import logging
 import math
 import argparse
 import re
+import urllib.error
+import urllib.request
 from collections import Counter, defaultdict
 import pandas as pd
 from typing import List, Dict, Any, Optional
@@ -62,7 +64,50 @@ def extract_codes_from_md(md_path: str) -> List[str]:
 def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
              base_url: Optional[str] = None, provider: str = "openai",
              max_tokens: Optional[int] = None, think: Optional[bool] = None,
-             json_mode: bool = True) -> str:
+             json_mode: bool = True,
+             response_schema: Optional[Dict[str, Any]] = None,
+             ollama_native: bool = False) -> str:
+    if ollama_native:
+        if not base_url:
+            raise ValueError("Ollama native API requires llm.base_url")
+        endpoint = base_url.rstrip("/")
+        if endpoint.endswith("/v1"):
+            endpoint = endpoint[:-3]
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+            "options": {"temperature": temperature},
+        }
+        if response_schema is not None:
+            payload["format"] = response_schema
+        elif json_mode:
+            payload["format"] = "json"
+        if max_tokens is not None:
+            payload["options"]["num_predict"] = max_tokens
+        if think is not None:
+            payload["think"] = think
+        request = urllib.request.Request(
+            f"{endpoint}/api/chat",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=600) as response:
+                response_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Ollama /api/chat returned HTTP {exc.code}: {body}") from exc
+        if response_data.get("done_reason") == "length":
+            raise ValueError("Ollama truncated the response at the output token limit.")
+        content = response_data.get("message", {}).get("content")
+        if not isinstance(content, str):
+            raise ValueError("Ollama /api/chat response did not contain message.content")
+        return content
     if provider == "google":
         api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
@@ -70,6 +115,8 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
         combined_prompt = f"{system_prompt}\n\n{prompt}"
         generation_options = {"temperature": temperature,
                               "response_mime_type": "application/json"}
+        if response_schema is not None:
+            generation_options["response_schema"] = response_schema
         if max_tokens is not None:
             generation_options["max_output_tokens"] = max_tokens
         client = genai.Client(api_key=api_key)
@@ -100,7 +147,12 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
             kwargs["max_tokens"] = max_tokens
         if think is not None:
             kwargs["extra_body"] = {"think": think}
-        if json_mode:
+        if response_schema is not None:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "coding_results", "schema": response_schema},
+            }
+        elif json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         
         response = client.chat.completions.create(**kwargs)
@@ -122,6 +174,30 @@ def parse_json_response(response_text: str) -> Dict:
         return json.loads(cleaned_text)
     except:
         return {"error": "parse_failure", "raw": response_text}
+
+
+def coding_response_schema(batch: List[Dict], id_col: str,
+                           valid_codes: List[str]) -> Dict[str, Any]:
+    """Constrain structured responses to this batch's IDs and codebook labels."""
+    return {
+        "type": "object",
+        "properties": {
+            "results": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "enum": [str(row[id_col]) for row in batch]},
+                        "codes": {"type": "array", "items": {"type": "string", "enum": valid_codes}},
+                    },
+                    "required": ["id", "codes"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["results"],
+        "additionalProperties": False,
+    }
 
 def build_coding_prompt(stream: Dict, context: str, codebook_md: str, batch: List[Dict], id_col: str, prompts: Dict[str, str]) -> (str, str):
     comments = "".join(f"ID: {r[id_col]}\nComment: {str(r.get(stream['column'], '')).replace(chr(10), ' ')}\n\n" for r in batch)
@@ -157,7 +233,10 @@ def process_stream(df: pd.DataFrame, stream: Dict, id_col: str, args: argparse.N
             response_text = call_llm(
                 user_p, sys_p, args.model, args.temperature,
                 args.openai_base_url, args.provider, args.max_output_tokens,
-                args.think, args.json_mode)
+                args.think, args.json_mode,
+                coding_response_schema(batch, id_col, valid_codes)
+                if args.structured_output else None,
+                getattr(args, "ollama_native", False))
             if args.diagnostic_log:
                 diagnostic["response"] = response_text
             batch_results = parse_json_response(response_text)
@@ -233,6 +312,8 @@ def main():
         args.max_output_tokens = llm.get("max_output_tokens")
     args.think = llm.get("think")
     args.json_mode = llm.get("json_mode", True)
+    args.structured_output = llm.get("structured_output", False)
+    args.ollama_native = llm.get("ollama_native", False)
     if args.max_output_tokens is not None and args.max_output_tokens < 1:
         raise ValueError("max_output_tokens must be a positive integer")
     if args.provider in ("vllm", "openwebui") and not args.openai_base_url:
