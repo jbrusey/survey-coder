@@ -203,10 +203,14 @@ def add_code_columns(df: pd.DataFrame, id_col: str,
     response_ids = df[id_col]
     for stream, result_map, codes in results:
         prefix = stream.get("prefix", stream["name"])
-        applied_codes = response_ids.map(lambda value: result_map.get(value, []))
+        applied_codes = response_ids.map(result_map)
         for code in codes:
-            output_columns[f"{prefix}_{code}"] = applied_codes.map(lambda values, code=code: int(code in values))
-        output_columns[f"{prefix}_Codes_Applied"] = applied_codes.map(lambda values: ", ".join(values))
+            output_columns[f"{prefix}_{code}"] = applied_codes.map(
+                lambda values, code=code: int(code in values) if isinstance(values, list) else pd.NA
+            ).astype("Int64")
+        output_columns[f"{prefix}_Codes_Applied"] = applied_codes.map(
+            lambda values: ", ".join(values) if isinstance(values, list) else pd.NA
+        )
     return pd.concat([df, pd.DataFrame(output_columns, index=df.index)], axis=1)
 
 def main():
