@@ -31,6 +31,162 @@ Clone the repository and install dependencies:
 uv sync
 ```
 
+### Web interface
+
+The web interface has one **Survey user** role. Users can upload a spreadsheet
+and existing Markdown codebook, code one question and download their own results.
+Sign-in, runs, source files and downloads enforce ownership on the server.
+There are no public registration, administrator or separate analyst roles.
+
+Install the optional web dependencies and provision an account:
+
+```bash
+uv sync --extra web
+uv run --extra web survey-coder-web create-user james
+```
+
+The command prompts for a password of at least 12 characters and confirmation;
+it does not accept passwords as command-line arguments. For local development:
+
+```bash
+uv run --extra web survey-coder-web serve --local-http
+```
+
+From **My runs**, choose **New coding run**:
+
+1. Upload an XLSX workbook and an existing UTF-8 Markdown codebook. Limits are
+   10 MiB for the workbook, 1 MiB for the codebook, and 10,000 data rows / 200
+   columns / 20 MiB of decoded cell text in the selected sheet. Code names use
+   level-two Markdown headings.
+2. Select a worksheet, preview its data, choose the response and optional unique
+   ID columns, and enter the question wording. If the survey uses a non-response
+   value such as `D/A`, enter it in **Non-response value (optional)**. Matching
+   uses the whole cell, trims surrounding whitespace and ignores letter case;
+   `D/A` and ` d/a ` match, but a sentence containing `D/A` does not. Leaving
+   the setting blank disables marker matching. Empty and whitespace-only cells
+   are always excluded. Imported formulas use cached cell values; formatting
+   is outside this CSV workflow.
+3. Check eligible, blank and configured non-response counts and the configured provider/model, then choose
+   **Start coding**. The status page refreshes while processing. You can close
+   the browser and return through My runs.
+4. Download the coded CSV and run manifest. The CSV retains source columns and
+   row order, adds generated `Survey_Row_ID` values, nullable `AI_<code>` columns,
+   `AI_Codes_Applied`, `AI_Status` and `AI_Error`. Explicit empty code sets get
+   zeros; blank, configured non-response and failed rows have missing code cells.
+   Configured non-response rows have `AI_Status=non_response`, no `AI_Error`, and
+   are never sent to the coding model. The manifest records the marker and matching
+   rule. A partial run remains labelled as partial. These settings apply to new
+   runs; existing run results do not change.
+
+The default model is OpenAI `gpt-4o-mini`, using `OPENAI_API_KEY` from the server
+environment or `.env`. To use another server-approved model, supply an existing
+analysis setup JSON containing `context`, `streams` and `llm`:
+
+```bash
+uv run --extra web survey-coder-web serve --local-http --config survey_config.example.json
+```
+
+For the group's vLLM server at `100.101.42.121:8000`, use the supplied
+`survey_config.vllm.json`:
+
+```bash
+env -u VLLM_API_KEY uv run --extra web survey-coder-web serve --local-http --config survey_config.vllm.json
+```
+
+This command removes an inherited API-key variable for this process so the
+application can load `VLLM_API_KEY` from `~/.env` or the project `.env`. It does
+not change either file or the calling shell. The web config uses `"model": "auto"`.
+When you check a new coding run, the web service queries the server's model list
+and selects its single advertised model. It shows the discovered ID before
+submission and pins that ID in the run manifest. If the server advertises more
+than one model, set an explicit model ID instead of assuming a default. The
+config contains no credential. Automatic model selection applies to the web
+workflow; CLI runs still require an explicit model ID.
+
+The web service uses that setup's context and LLM settings; users choose their
+worksheet and question in the browser. `SURVEY_CODER_WEB_CONFIG` also sets this
+path. For vLLM/OpenWebUI, use the existing `llm.base_url` or provider base-URL
+environment variable and keep keys in the server environment. Endpoint URLs
+must not embed credentials or query parameters. Model selection and credentials
+remain server-managed. The setup page blocks submission when a required
+OpenAI/Google key is absent; it does not claim that an untested key or endpoint
+works. A successful coding request establishes connectivity.
+
+The service starts a separate worker process and persists its queue and row
+checkpoints in SQLite. Workers send response text and generated row IDs, plus
+the question, codebook and prompts, to the configured model; they do not send
+unrelated spreadsheet columns. The manifest snapshots the provider settings,
+prompts, codebook, operator and file hashes without API keys. Provider errors
+appear as row failures with safe explanations. This increment has no manual
+retry or cancellation screen. After interruption, an unfinished job can resume
+from its checkpoints when its worker lease expires (up to about one minute).
+An interrupted provider request can incur another charge on resumption.
+
+Open [the local web interface](http://127.0.0.1:8000) and sign in. Local HTTP mode
+also accepts `http://localhost:8000` and binds to loopback. Keep the same hostname
+when loading and submitting a form; cookies are specific to that hostname.
+For a hosted installation, use an HTTPS reverse proxy and
+specify the public origin:
+
+```bash
+uv run --extra web survey-coder-web serve --origin https://survey.example.org
+```
+
+This command listens on `127.0.0.1:8000` behind the proxy and requires secure
+session cookies. The proxy must preserve the public Host header. Sessions expire
+after eight hours; signing out revokes the server-side session. Sign-in forms
+and sign-out requests require CSRF tokens. The service limits sign-in attempts
+to ten per minute per directly connected client address; a reverse proxy shares
+that allowance unless the deployment adds its own trusted-client rate limiting.
+Forwarded headers do not override client addresses.
+
+To reset a forgotten password without losing runs or files:
+
+```bash
+uv run --extra web survey-coder-web reset-password james
+```
+
+Enter the new password twice at the hidden prompts (at least 12 characters).
+The command revokes existing sessions and preserves the user's identity, runs
+and files. The running server reads the new password on the next sign-in; no
+restart is needed. If you previously disabled the account, add `--enable` to the
+reset command to re-enable it. Use the same database path as the server.
+
+To re-enable an account without another password reset:
+
+```bash
+uv run --extra web survey-coder-web enable-user james
+```
+
+To disable an account and revoke its sessions:
+
+```bash
+uv run --extra web survey-coder-web disable-user james
+```
+
+Account names are case-insensitive. The default SQLite database lives at
+`~/.survey-coder/web.sqlite3`; override it with `SURVEY_CODER_WEB_DATABASE` or
+the global `--database /path/to/web.sqlite3` option before the subcommand.
+The database contains salted scrypt password hashes, hashed session tokens and
+private resource records. Keep it outside public file-serving directories and
+include it in the deployment's access, backup and retention arrangements.
+Account sign-in is a local foundation pending the hosting team's institutional
+identity integration. Provider credentials stay in the server environment.
+
+`GET /health/live` checks web-process liveness only. `GET /health/ready` checks
+the worker process and required configuration, not live provider connectivity.
+Authenticated endpoints are `GET /api/me`, `GET /api/runs`,
+`GET /api/runs/{run_id}` and `GET /api/files/{file_id}`. The resource endpoints
+enforce ownership on the server. Browser pages use `/runs/new`,
+`POST /runs/upload`, `/runs/{id}/setup`, `POST /runs/{id}/start` and `/runs/{id}`.
+Uploads and submission require the current session's CSRF token.
+
+Run the web tests together with the existing suite:
+
+```bash
+uv run --extra web pytest
+```
+
 ### Graphical interface
 
 A portable Tkinter GUI is included for Windows, macOS, and Linux. It selects CSV/Excel input files and worksheets, lets you choose columns and runtime settings, and runs discovery/coding in-process (without shelling out to the CLI):

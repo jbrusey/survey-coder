@@ -21,3 +21,7 @@ ollama_eval/
 ollama_results*/
 
 .DS_Store
+
+# Local web identity/session database
+*.sqlite3
+*.sqlite3-*
