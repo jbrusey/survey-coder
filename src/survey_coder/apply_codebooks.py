@@ -16,6 +16,7 @@ from google.genai import types
 from dotenv import load_dotenv
 from .data import load_data
 from .provider_responses import extract_completion
+from .web_failures import OutputTruncatedError
 from .config import (PROVIDERS, api_key_environment_name, base_url_environment_name,
                      load_config, load_prompt)
 
@@ -62,7 +63,9 @@ def extract_codes_from_md(md_path: str) -> List[str]:
 def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
              base_url: Optional[str] = None, provider: str = "openai",
              max_tokens: Optional[int] = None, think: Optional[bool] = None,
-             json_mode: bool = True) -> str:
+             json_mode: bool = True, response_schema: Optional[Dict] = None) -> str:
+    if response_schema is not None and (not json_mode or provider == "google"):
+        raise ValueError("Schema-constrained coding requires an OpenAI-compatible provider with json_mode enabled.")
     if provider == "google":
         api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
@@ -78,6 +81,8 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
             contents=combined_prompt,
             config=types.GenerateContentConfig(**generation_options),
         )
+        if any(candidate.finish_reason == types.FinishReason.MAX_TOKENS for candidate in (response.candidates or [])):
+            raise OutputTruncatedError("Model output was truncated at the output limit.")
         return response.text
     else:
         api_key = os.environ.get(api_key_environment_name(provider))
@@ -100,7 +105,12 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
             kwargs["max_tokens"] = max_tokens
         if think is not None:
             kwargs["extra_body"] = {"think": think}
-        if json_mode:
+        if response_schema is not None:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "survey_coding", "strict": True, "schema": response_schema},
+            }
+        elif json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         
         response = client.chat.completions.create(**kwargs)
@@ -108,7 +118,7 @@ def call_llm(prompt: str, system_prompt: str, model: str, temperature: float,
             response, "OpenWebUI" if provider == "openwebui" else "OpenAI-compatible provider")
         if finish_reason == "length":
             limit = f"{max_tokens}-token " if max_tokens is not None else "server "
-            raise ValueError(f"Model output was truncated at the {limit}output limit.")
+            raise OutputTruncatedError(f"Model output was truncated at the {limit}output limit.")
         return response_text
 
 def parse_json_response(response_text: str) -> Dict:
@@ -125,7 +135,9 @@ def parse_json_response(response_text: str) -> Dict:
 
 def build_coding_prompt(stream: Dict, context: str, codebook_md: str, batch: List[Dict], id_col: str, prompts: Dict[str, str]) -> (str, str):
     comments = "".join(f"ID: {r[id_col]}\nComment: {str(r.get(stream['column'], '')).replace(chr(10), ' ')}\n\n" for r in batch)
-    values = {"context": context, "stream_name": stream["name"], "codebook": codebook_md, "count": len(batch), "comments": comments}
+    example = json.dumps({"results": [{"id": str(row[id_col]), "codes": []} for row in batch]}, ensure_ascii=False)
+    values = {"context": context, "stream_name": stream["name"], "codebook": codebook_md, "count": len(batch), "comments": comments,
+              "response_example": example}
     return prompts["system"].format(**values), prompts["batch"].format(**values)
 
 def process_stream(df: pd.DataFrame, stream: Dict, id_col: str, args: argparse.Namespace, context: str, prompts: Dict[str, str]) -> Dict[str, List[str]]:

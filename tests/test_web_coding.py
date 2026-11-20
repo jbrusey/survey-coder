@@ -172,6 +172,141 @@ class CodingWebTests(unittest.TestCase):
         self.assertNotIn(b"DO_NOT_EXPOSE", output)
         self.assertIn(b"Provider request failed", output)
 
+    def test_failure_breakdown_and_retry_preserve_successes(self):
+        run_id = self.draft()
+        self.start(run_id)
+        def partial(*_):
+            return json.dumps({"results": [{"id": "R000001", "codes": ["secret-unknown-name"]},
+                {"id": "R000002", "codes": []}, {"id": "R000003", "codes": ["Practice"]}]})
+        work_once(self.store, call=partial)
+        previous = self.store.job(self.alice, run_id)
+        report = self.client.get(f"/api/runs/{run_id}").json()["failures"]
+        self.assertEqual([item["row_id"] for item in report["rows"]], ["R000001", "R000004", "R000005"])
+        self.assertEqual([item["count"] for item in report["summary"]], [1, 2])
+        page = self.client.get(f"/runs/{run_id}").text
+        for text in ("Why responses failed", "Would retrying help?", "R000004", "Retry failed responses"):
+            self.assertIn(text, page)
+        self.assertNotIn("secret-unknown-name", page + json.dumps(report))
+        response = self.client.post(f"/runs/{run_id}/retry", data={"csrf": self.csrf}, follow_redirects=False)
+        self.assertEqual(response.status_code, 303, response.text)
+        queued = self.store.job(self.alice, run_id)
+        self.assertEqual(queued["counts"]["completed"], 2)
+        self.assertEqual(queued["counts"]["failed"], 0)
+        self.assertEqual(queued["counts"]["remaining"], 3)
+        self.assertIsNone(queued["result_id"])
+        self.assertEqual(self.client.post(f"/runs/{run_id}/retry", data={"csrf": self.csrf}).status_code, 409)
+        prompts = []
+        def provider(prompt, system, *args):
+            prompts.append(prompt)
+            self.assertEqual(len(re.findall(r"ID: R\d+", prompt)), 1)
+            self.assertIn("Allowed code names", system)
+            return self.fake_provider(prompt, system, *args)
+        work_once(self.store, call=provider)
+        self.assertEqual(len(prompts), 3)
+        self.assertNotIn("ID: R000002", "".join(prompts))
+        final = self.store.job(self.alice, run_id)
+        self.assertEqual(final["status"], "completed")
+        output = pd.read_csv(BytesIO(self.store.file(self.alice, final["result_id"])["content"]))
+        self.assertEqual(output.iloc[1]["AI_Explanation"], 0)
+        self.assertEqual(output.iloc[2]["AI_Explanation"], 0)  # Preserve original Practice-only coding.
+        self.assertEqual(output["AI_Status"].tolist(), ["coded"] * 5 + ["blank"])
+        manifest = json.loads(self.store.file(self.alice, final["manifest_id"])["content"])
+        self.assertEqual(manifest["retry_count"], 1)
+        self.assertEqual(manifest["request_batch_size"], 1)
+        self.assertEqual(manifest["failures"]["rows"], [])
+        self.assertIsNotNone(self.store.file(self.alice, previous["result_id"]))
+        self.assertEqual(self.client.post(f"/runs/{run_id}/retry", data={"csrf": self.csrf}).status_code, 409)
+
+    def test_retry_requires_owner_csrf_and_same_origin(self):
+        run_id = self.draft()
+        self.start(run_id)
+        work_once(self.store, call=lambda *_: "bad JSON with secret text")
+        for kwargs in ({"data": {"csrf": "wrong"}},
+                       {"data": {"csrf": self.csrf}, "headers": {"Origin": "https://elsewhere.test"}}):
+            self.assertEqual(self.client.post(f"/runs/{run_id}/retry", **kwargs).status_code, 403)
+        with TestClient(self.app) as bob:
+            bob.get("/login")
+            home = bob.post("/login", data={"username": "bob", "password": "bob-password-456",
+                                           "csrf": bob.cookies.get("survey_login_csrf")})
+            csrf = re.search(r'name="csrf" value="([^"]+)"', home.text).group(1)
+            self.assertEqual(bob.post(f"/runs/{run_id}/retry", data={"csrf": csrf}).status_code, 404)
+            self.assertEqual(bob.get(f"/api/runs/{run_id}").status_code, 404)
+        with TestClient(self.app) as anonymous:
+            self.assertEqual(anonymous.post(f"/runs/{run_id}/retry", data={"csrf": self.csrf}).status_code, 401)
+        self.assertEqual(self.store.job(self.alice, run_id)["status"], "failed")
+
+    def test_job_level_failure_can_retry_pending_rows_and_fences_old_worker(self):
+        run_id = self.draft()
+        self.start(run_id)
+        self.store.claim("old")
+        self.store.checkpoint(run_id, "old", [(0, "coded", [], None)])
+        self.store.fail(run_id, "old", "Worker stopped.")
+        self.assertTrue(self.store.retry_failed(self.alice, run_id))
+        self.assertFalse(self.store.renew(run_id, "old"))
+        self.store.fail(run_id, "old", "Stale worker")
+        self.assertEqual(self.store.job(self.alice, run_id)["status"], "queued")
+        work_once(self.store, call=self.fake_provider)
+        self.assertEqual(self.store.job(self.alice, run_id)["status"], "completed")
+
+    def test_legacy_failures_have_guidance_without_changing_existing_rows(self):
+        run_id = self.draft()
+        self.start(run_id)
+        self.store.claim("old")
+        self.store.checkpoint(run_id, "old", [(0, "failed", None, "Model returned invalid or unknown code names.")])
+        response = self.client.get(f"/runs/{run_id}")
+        self.assertIn("saved result does not distinguish", response.text)
+        self.assertIn("R000001", response.text)
+        self.assertNotIn("Retry failed responses", response.text)  # Still running.
+
+    def test_vllm_retry_constrains_codes_even_for_a_legacy_run(self):
+        run_id = self.draft()
+        self.start(run_id)
+        self.store.claim("old")
+        outcomes = [(index, "failed", None, "Model returned unknown code names.") if index == 0
+                    else (index, "coded", [], None) for index in range(5)]
+        self.store.checkpoint(run_id, "old", outcomes)
+        self.store.finish(run_id, "old", b"previous CSV", b"{}")
+        with self.store.connect() as db:
+            spec = self.store.job(self.alice, run_id)["spec"]
+            spec["config"]["provider"] = "vllm"
+            spec["config"].pop("structured_outputs", None)  # Saved before this change.
+            db.execute("UPDATE coding_jobs SET spec = ? WHERE run_id = ?", (json.dumps(spec), run_id))
+        self.assertTrue(self.store.retry_failed(self.alice, run_id))
+        with patch("survey_coder.apply_codebooks.OpenAI") as sdk:
+            sdk.return_value.chat.completions.create.return_value = SimpleNamespace(choices=[
+                SimpleNamespace(finish_reason="stop", message=SimpleNamespace(
+                    content='{"results": [{"id": "R000001", "codes": ["Explanation"]}]}'))])
+            work_once(self.store)
+        request = sdk.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(sdk.return_value.chat.completions.create.call_count, 1)
+        schema = request["response_format"]["json_schema"]["schema"]
+        fields = schema["properties"]["results"]["items"]["properties"]
+        self.assertEqual(fields["id"]["enum"], ["R000001"])
+        self.assertEqual(fields["codes"]["items"]["enum"], ["Explanation", "Practice"])
+        final = self.store.job(self.alice, run_id)
+        self.assertEqual(final["status"], "completed")
+        manifest = json.loads(self.store.file(self.alice, final["manifest_id"])["content"])
+        self.assertTrue(manifest["structured_outputs"])
+
+    def test_rejected_schema_is_visible_and_does_not_silently_fall_back(self):
+        import httpx
+        from openai import BadRequestError
+        run_id = self.draft()
+        self.start(run_id)
+        with self.store.connect() as db:
+            spec = self.store.job(self.alice, run_id)["spec"]
+            spec["config"]["structured_outputs"] = True
+            db.execute("UPDATE coding_jobs SET spec = ? WHERE run_id = ?", (json.dumps(spec), run_id))
+        with patch("survey_coder.apply_codebooks.OpenAI") as sdk:
+            sdk.return_value.chat.completions.create.side_effect = BadRequestError(
+                "private provider text", response=httpx.Response(400, request=httpx.Request("POST", "https://provider.test")), body=None)
+            work_once(self.store)
+        self.assertEqual(sdk.return_value.chat.completions.create.call_count, 1)
+        report = self.client.get(f"/api/runs/{run_id}").json()["failures"]
+        self.assertIn("schema-constrained request", report["summary"][0]["reason"])
+        self.assertIn("structured-output support", report["summary"][0]["guidance"])
+        self.assertNotIn("private provider text", json.dumps(report))
+
     def test_checkpoint_and_lease_survive_new_store_and_skip_committed_rows(self):
         from survey_coder.web_store import Store
         run_id = self.draft()
@@ -373,3 +508,37 @@ class InputValidationTests(unittest.TestCase):
                 self.assertEqual(validate_batch(payload, [0], ["Code"])[0][1], "failed")
         self.assertEqual(validate_batch({"results": [{"id": "R000001", "codes": []}]}, [0], ["Code"]),
                          [(0, "coded", [], None)])
+
+
+class FailureClassificationTests(unittest.TestCase):
+    def test_safe_provider_classification(self):
+        import httpx
+        from openai import APIStatusError, APITimeoutError, APIConnectionError
+        from google.genai.errors import APIError
+        from survey_coder.web_failures import OutputTruncatedError, provider_failure
+        request = httpx.Request("POST", "https://provider.test/v1")
+        cases = [(OutputTruncatedError("secret"), "truncated"),
+                 (APITimeoutError(request=request), "timed out"),
+                 (APIConnectionError(request=request), "connect"),
+                 (RuntimeError("secret"), "Provider request failed")]
+        for status, expected in [(401, "credentials"), (403, "credentials"), (429, "rate limit"),
+                                 (500, "temporarily"), (503, "temporarily"), (504, "timed out"), (400, "settings"), (404, "settings")]:
+            cases.append((APIStatusError("secret", response=httpx.Response(status, request=request), body={"secret": "text"}), expected))
+            cases.append((APIError(status, {"error": {"message": "secret"}}), expected))
+        for exception, expected in cases:
+            with self.subTest(exception=type(exception).__name__, expected=expected):
+                message = provider_failure(exception)
+                self.assertIn(expected, message)
+                self.assertNotIn("secret", message)
+
+    def test_invalid_json_is_distinct_from_missing_results(self):
+        from survey_coder.apply_codebooks import parse_json_response
+        result = validate_batch(parse_json_response("secret invalid JSON"), [0], ["Code"])
+        self.assertEqual(result[0][3], "Model returned invalid JSON.")
+
+    def test_distinct_invalid_code_reasons_never_echo_model_output(self):
+        for labels, reason in [("secret", "invalid codes list"), ([{}], "invalid codes list"),
+                               (["secret"], "unknown code names"), (["Code", "Code"], "duplicate code names")]:
+            result = validate_batch({"results": [{"id": "R000001", "codes": labels}]}, [0], ["Code"])
+            self.assertIn(reason, result[0][3])
+            self.assertNotIn("secret", result[0][3])

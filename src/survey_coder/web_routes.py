@@ -12,6 +12,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .web_coding import (MAX_CODEBOOK_BYTES, MAX_WORKBOOK_BYTES, configuration_problem,
                          make_spec, read_codebook, read_sheet, resolve_model, sheets)
+from .web_failures import failure_report
 
 
 def register_coding_routes(app, store, current_user, check_csrf, check_origin, form, page, config):
@@ -174,6 +175,16 @@ def register_coding_routes(app, store, current_user, check_csrf, check_origin, f
             raise HTTPException(404, "Run not found.")
         return RedirectResponse(f"/runs/{run_id}", status_code=303)
 
+    @app.post("/runs/{run_id}/retry")
+    async def retry(run_id: str, request: Request, user=Depends(current_user)):
+        check_origin(request)
+        values = await form(request)
+        check_csrf(user["csrf"], values.get("csrf", ""))
+        owned_job(user, run_id)
+        if not store.retry_failed(user["id"], run_id):
+            raise HTTPException(409, "Only a finished run with unsuccessful responses can be retried. Refresh its status.")
+        return RedirectResponse(f"/runs/{run_id}", status_code=303)
+
     @app.get("/runs/{run_id}")
     def status(run_id: str, user=Depends(current_user)):
         job = owned_job(user, run_id)
@@ -184,11 +195,26 @@ def register_coding_routes(app, store, current_user, check_csrf, check_origin, f
         downloads = "".join(f'<p><a class="button" href="/api/files/{job[key]}">{label}</a></p>'
                             for key, label in (("result_id", "Download coded CSV"), ("manifest_id", "Download run manifest")) if job[key])
         error = f'<p class="error" role="alert">{e(job["error"])}</p>' if job["error"] else ""
+        diagnostics = ""
         if counts.get("failed"):
-            error += '<p class="error">Some responses failed. Their code cells are blank; see AI_Error in the CSV for details.</p>'
+            error += '<p class="error">Some responses failed. Their code cells are blank.</p>'
+            report = failure_report(store.row_results(run_id))
+            summary = "".join(f'<tr><td>{item["count"]}</td><td>{e(item["reason"])}</td><td>{e(item["guidance"])}</td></tr>'
+                              for item in report["summary"])
+            rows = "".join(f'<tr><td>{item["row_id"]}</td><td>{e(item["reason"])}</td></tr>' for item in report["rows"])
+            diagnostics = f'''<h2>Why responses failed</h2>
+<div class="table-scroll"><table><thead><tr><th>Responses</th><th>Reason</th><th>Would retrying help?</th></tr></thead><tbody>{summary}</tbody></table></div>
+<details><summary>Failed response IDs ({len(report['rows'])})</summary>
+<p>Match these IDs to Survey_Row_ID in the CSV. IDs follow the original worksheet order.</p>
+<div class="table-scroll"><table><thead><tr><th>Survey row ID</th><th>Reason</th></tr></thead><tbody>{rows}</tbody></table></div></details>'''
+        retry_form = ""
+        if job["status"] in ("failed", "completed_with_errors") and (counts.get("failed") or counts.get("remaining")):
+            retry_form = f'''<h2>Retry unsuccessful responses</h2>
+<p>Successful results, blank rows and configured non-responses are preserved. Failed and unprocessed responses are sent one at a time using the original model and settings. New CSV and manifest downloads appear when this attempt finishes. Additional provider charges may apply.</p>
+<form action="/runs/{run_id}/retry" method="post">{hidden(user)}<button type="submit">Retry failed responses</button></form>'''
         state = job["status"].replace("_", " ").title()
         response = page(job["name"], f'''<section class="card"><p><a href="/">← My runs</a></p><h1>{e(job['name'])}</h1>
-<p role="status"><strong>{e(state)}</strong></p>{error}<dl class="counts">{count_list}</dl>{downloads}
+<p role="status"><strong>{e(state)}</strong></p>{error}<dl class="counts">{count_list}</dl>{diagnostics}{retry_form}{downloads}
 <p><a href="/runs/{run_id}">Refresh status</a></p><p class="muted">You can close the browser and return from My runs.</p></section>''')
         if job["status"] in ("queued", "running"):
             response.headers["Refresh"] = "5"

@@ -13,6 +13,35 @@ from survey_coder.apply_codebooks import add_code_columns, call_llm, process_str
 
 
 class ApplyCodebooksProviderTests(unittest.TestCase):
+    @patch("survey_coder.apply_codebooks.OpenAI")
+    def test_schema_is_sent_as_a_constraint_instead_of_plain_json_mode(self, openai):
+        from survey_coder.web_coding import coding_response_schema
+        schema = coding_response_schema([12], ["Negative - Don't feel valued", "Negative -bureaucracy"])
+        openai.return_value.chat.completions.create.return_value = Mock(
+            choices=[Mock(finish_reason="stop", message=Mock(content='{"results": []}'))])
+        call_llm("prompt", "system", "model", 0, "http://provider.test/v1", "vllm",
+                 response_schema=schema)
+        request = openai.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(request["response_format"], {"type": "json_schema", "json_schema": {
+            "name": "survey_coding", "strict": True, "schema": schema}})
+        fields = schema["properties"]["results"]["items"]["properties"]
+        self.assertEqual(fields["id"]["enum"], ["R000013"])
+        self.assertEqual(fields["codes"]["items"]["enum"],
+                         ["Negative - Don't feel valued", "Negative -bureaucracy"])
+
+    def test_default_prompt_uses_real_ids_and_does_not_suggest_invented_codes(self):
+        from survey_coder.config import load_prompt
+        root = Path(__file__).resolve().parents[1] / "prompts"
+        prompts = {"system": load_prompt(str(root), "code_system.txt"),
+                   "batch": load_prompt(str(root), "code_batch.txt")}
+        system, prompt = apply_codebooks.build_coding_prompt(
+            {"name": "Proud", "column": "Comment"}, "Survey", "## Negative - Used to be proud",
+            [{"ID": "R000013", "Comment": "I used to feel proud."}], "ID", prompts)
+        self.assertIn('"id": "R000013", "codes": []', prompt)
+        self.assertNotIn('"Code A"', prompt)
+        self.assertNotIn('"..."', prompt)
+        self.assertNotIn("use 'Other'", system)
+
     @patch("survey_coder.apply_codebooks.load_config", return_value={"llm": {"temperature": float("nan")}})
     def test_nonfinite_config_temperature_is_rejected_before_coding(self, _load_config):
         with patch.object(sys, "argv", ["apply_codebooks", "--input", "in.csv",
@@ -88,6 +117,25 @@ class ApplyCodebooksProviderTests(unittest.TestCase):
                             "http://localhost:3000/api", "openwebui")
 
         self.assertEqual(response, '{"results": []}')
+
+    @patch("survey_coder.apply_codebooks.OpenAI")
+    def test_truncated_output_has_a_distinct_safe_error(self, openai):
+        from survey_coder.web_failures import OutputTruncatedError
+        openai.return_value.chat.completions.create.return_value = Mock(
+            choices=[Mock(finish_reason="length", message=Mock(content="partial private output"))])
+        with self.assertRaises(OutputTruncatedError) as error:
+            call_llm("prompt", "system", "model", 0, max_tokens=123)
+        self.assertNotIn("private", str(error.exception))
+
+    @patch("survey_coder.apply_codebooks.genai.Client")
+    def test_google_truncation_is_not_reported_as_invalid_json(self, client_class):
+        from google.genai import types
+        from survey_coder.web_failures import OutputTruncatedError
+        client_class.return_value.models.generate_content.return_value = Mock(
+            text="partial private output", candidates=[Mock(finish_reason=types.FinishReason.MAX_TOKENS)])
+        with patch.dict("os.environ", {"GOOGLE_API_KEY": "secret"}):
+            with self.assertRaises(OutputTruncatedError):
+                call_llm("prompt", "system", "gemini-model", 0, provider="google")
 
 
 class DiagnosticLogTests(unittest.TestCase):

@@ -7,6 +7,14 @@ from survey_coder.config import load_config
 
 
 class ConfigTests(unittest.TestCase):
+    def test_structured_outputs_must_be_boolean(self):
+        base = {"streams": [{"name": "Q1", "column": "Comment", "question": "Q?"}]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps({**base, "llm": {"structured_outputs": "true"}}))
+            with self.assertRaisesRegex(ValueError, "llm.structured_outputs"):
+                load_config(str(path))
+
     def test_temperature_must_be_finite_nonnegative_number(self):
         base = {"streams": [{"name": "Q1", "column": "Comment", "question": "Q?"}]}
         for temperature in (-0.1, float("nan"), float("inf"), 10**1000, True, "0.2"):

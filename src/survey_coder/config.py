@@ -61,7 +61,7 @@ def load_config(path: str | None) -> Dict[str, Any]:
         raise ValueError("Config 'llm' must be an object")
     if llm.get("provider") not in (None, *PROVIDERS):
         raise ValueError("Config llm.provider must be 'openai', 'google', 'vllm', or 'openwebui'")
-    for option in ("think", "json_mode"):
+    for option in ("think", "json_mode", "structured_outputs"):
         if option in llm and not isinstance(llm[option], bool):
             raise ValueError(f"Config llm.{option} must be a boolean")
     temperature = llm.get("temperature")

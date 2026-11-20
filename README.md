@@ -69,7 +69,15 @@ From **My runs**, choose **New coding run**:
 3. Check eligible, blank and configured non-response counts and the configured provider/model, then choose
    **Start coding**. The status page refreshes while processing. You can close
    the browser and return through My runs.
-4. Download the coded CSV and run manifest. The CSV retains source columns and
+4. Review any failures on the status page: reasons are grouped with counts and
+   guidance on whether retrying may help. Expand **Failed response IDs** to match
+   failures to `Survey_Row_ID` in the CSV. Choose **Retry failed responses** on a
+   finished partial or failed run to queue only failed and unprocessed responses.
+   Successful coding and excluded rows are preserved. Retries send one response
+   per request using the original model and settings, and may incur additional
+   provider charges. Repeated code-name failures need a codebook or model review;
+   credential or request-setting errors need a maintainer fix first.
+5. Download the coded CSV and run manifest. The CSV retains source columns and
    row order, adds generated `Survey_Row_ID` values, nullable `AI_<code>` columns,
    `AI_Codes_Applied`, `AI_Status` and `AI_Error`. Explicit empty code sets get
    zeros; blank, configured non-response and failed rows have missing code cells.
@@ -103,6 +111,23 @@ than one model, set an explicit model ID instead of assuming a default. The
 config contains no credential. Automatic model selection applies to the web
 workflow; CLI runs still require an explicit model ID.
 
+Web coding with vLLM and JSON mode now requests a JSON schema that restricts
+returned codes to exact codebook names and returned IDs to the current batch.
+This uses [vLLM structured outputs](https://docs.vllm.ai/en/latest/features/structured_outputs/),
+including for retries of older runs without a saved capability setting. It
+prevents invented or paraphrased code names when the server enforces the schema;
+the application still validates IDs, duplicate codes and all returned results.
+The manifest records whether this constraint was requested. New prompts use
+actual response IDs and empty code-list examples instead of placeholder names.
+
+Set `llm.structured_outputs` explicitly to `false` for new web runs on a vLLM
+server that does not support this feature. Other OpenAI-compatible providers
+can opt in with `true` when supported; it requires `llm.json_mode=true`.
+This option currently applies to the web worker, not CLI coding or Google.
+A rejected schema request remains a visible failure with maintainer guidance;
+the worker does not silently fall back to unconstrained output or make extra
+requests. Retries retain explicit settings saved in the original run.
+
 The web service uses that setup's context and LLM settings; users choose their
 worksheet and question in the browser. `SURVEY_CODER_WEB_CONFIG` also sets this
 path. For vLLM/OpenWebUI, use the existing `llm.base_url` or provider base-URL
@@ -117,8 +142,13 @@ checkpoints in SQLite. Workers send response text and generated row IDs, plus
 the question, codebook and prompts, to the configured model; they do not send
 unrelated spreadsheet columns. The manifest snapshots the provider settings,
 prompts, codebook, operator and file hashes without API keys. Provider errors
-appear as row failures with safe explanations. This increment has no manual
-retry or cancellation screen. After interruption, an unfinished job can resume
+appear as row failures with safe explanations, without exposing provider messages
+or generated invalid labels. New manifests also record failure summaries, row IDs,
+retry count and request batch size. Existing failures retain their original
+explanations; older generic failures cannot be diagnosed retrospectively.
+A retry regenerates the CSV and manifest when it finishes; previous downloaded
+files remain snapshots of their earlier attempt. There is no cancellation screen.
+After interruption, an unfinished job can resume
 from its checkpoints when its worker lease expires (up to about one minute).
 An interrupted provider request can incur another charge on resumption.
 
@@ -179,7 +209,8 @@ Authenticated endpoints are `GET /api/me`, `GET /api/runs`,
 `GET /api/runs/{run_id}` and `GET /api/files/{file_id}`. The resource endpoints
 enforce ownership on the server. Browser pages use `/runs/new`,
 `POST /runs/upload`, `/runs/{id}/setup`, `POST /runs/{id}/start` and `/runs/{id}`.
-Uploads and submission require the current session's CSRF token.
+Uploads, submission and `POST /runs/{id}/retry` require the current session's CSRF
+token. The run API includes safe failure summaries and failed row IDs.
 
 Run the web tests together with the existing suite:
 

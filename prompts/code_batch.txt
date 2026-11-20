@@ -2,4 +2,5 @@ Code the following {count} comments using the provided codebook.
 
 {comments}
 Return JSON with this structure:
-{{"results": [{{"id": "...", "codes": ["Code A", "Code B"]}}]}}
+{response_example}
+Copy each supplied ID exactly. Replace each empty codes list with the applicable exact codebook names, or leave it empty if none applies. Return every supplied ID exactly once.

@@ -238,6 +238,9 @@ def create_app(database: Path, *, origin: str, secure_cookie: bool = True,
         job = store.job(user["id"], run_id)
         if job:
             result.update(counts=job["counts"], error=job["error"], result_id=job["result_id"], manifest_id=job["manifest_id"])
+            from .web_failures import failure_report
+            result["failures"] = failure_report(store.row_results(run_id))
+            result["retry_count"] = (job["spec"] or {}).get("retry_count", 0)
         return result
 
     @app.get("/api/files/{file_id}")

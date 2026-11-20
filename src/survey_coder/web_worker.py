@@ -14,14 +14,17 @@ import time
 import pandas as pd
 
 from . import apply_codebooks as engine
-from .web_coding import ERROR, ROW_ID, STATUS
+from .web_coding import ERROR, ROW_ID, STATUS, coding_response_schema
 from .web_store import Store
+from .web_failures import failure_report, provider_failure
 
 logger = logging.getLogger(__name__)
 
 
 def validate_batch(payload: object, indices: list[int], valid_codes: list[str]) -> list[tuple]:
     expected = {f"R{index + 1:06d}": index for index in indices}
+    if isinstance(payload, dict) and payload.get("error") == "parse_failure":
+        return [(index, "failed", None, "Model returned invalid JSON.") for index in indices]
     if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
         return [(index, "failed", None, "Model response did not contain a results list.") for index in indices]
     found: dict[str, list] = {}
@@ -37,9 +40,12 @@ def validate_batch(payload: object, indices: list[int], valid_codes: list[str]) 
             error = "Model omitted this response ID."
         elif len(items) != 1:
             error = "Model returned this response ID more than once."
-        elif (not isinstance(labels, list) or any(not isinstance(code, str) or code not in valid_codes for code in labels)
-              or len(set(labels)) != len(labels)):
-            error = "Model returned invalid or unknown code names."
+        elif not isinstance(labels, list) or any(not isinstance(code, str) for code in labels):
+            error = "Model returned an invalid codes list."
+        elif any(code not in valid_codes for code in labels):
+            error = "Model returned unknown code names."
+        elif len(set(labels)) != len(labels):
+            error = "Model returned duplicate code names."
         else:
             error = None
         outcomes.append((index, "failed" if error else "coded", labels if not error else None, error))
@@ -52,22 +58,30 @@ def execute_job(store: Store, job: dict, worker: str, call=None):
     config = spec["config"]
     frame = pd.DataFrame(spec["data"], columns=spec["columns"])
     pending = store.pending(run_id)
+    batch_size = 1 if spec.get("retry_count", 0) else config["batch_size"]
+    # Older saved runs predate the capability setting. Apply the vLLM default
+    # on retry as well, without changing their codebook, model or source rows.
+    structured_outputs = config.get("structured_outputs", config["provider"] == "vllm" and config["json_mode"])
     stream = {"name": spec["column"], "column": spec["column"], "prefix": "AI"}
-    for offset in range(0, len(pending), config["batch_size"]):
+    for offset in range(0, len(pending), batch_size):
         if not store.renew(run_id, worker):
             return
-        indices = pending[offset:offset + config["batch_size"]]
+        indices = pending[offset:offset + batch_size]
         records = [{ROW_ID: f"R{index + 1:06d}", spec["column"]: frame.iloc[index][spec["column"]]} for index in indices]
         system, prompt = engine.build_coding_prompt(
             stream, config["context"] + "\nSurvey question: " + spec["question"], spec["codebook"], records, ROW_ID, config["prompts"])
+        system += ("\nAllowed code names (copy these strings exactly; do not include heading numbers): "
+                   + json.dumps(spec["codes"], ensure_ascii=False)
+                   + ". Return an empty codes list if none applies. Never invent an Other or Unclear code.")
         try:
+            schema_args = [coding_response_schema(indices, spec["codes"])] if structured_outputs else []
             text = call(prompt, system, config["model"], config["temperature"], config["base_url"],
-                        config["provider"], config["max_output_tokens"], config["think"], config["json_mode"])
+                        config["provider"], config["max_output_tokens"], config["think"], config["json_mode"], *schema_args)
             results = validate_batch(engine.parse_json_response(text), indices, spec["codes"])
         except Exception as exc:
             # Provider messages may contain credentials or comment text. Store a safe explanation.
             logger.warning("Coding request failed (%s) for run %s", type(exc).__name__, run_id)
-            results = [(index, "failed", None, "Provider request failed. Ask the service maintainer to check connectivity, credentials and model settings.") for index in indices]
+            results = [(index, "failed", None, provider_failure(exc, schema_constrained=structured_outputs)) for index in indices]
         if not store.checkpoint(run_id, worker, results):
             return
     rows = store.row_results(run_id)
@@ -84,6 +98,9 @@ def execute_job(store: Store, job: dict, worker: str, call=None):
                 "non_response_value": spec.get("non_response_value"),
                 "non_response_matching": spec.get("non_response_matching"),
                 "configuration": config, "source_sha256": spec["source_sha256"],
+                "retry_count": spec.get("retry_count", 0), "request_batch_size": batch_size,
+                "structured_outputs": structured_outputs,
+                "failures": failure_report(rows),
                 "codebook_sha256": spec["codebook_sha256"], "result_sha256": hashlib.sha256(csv).hexdigest(),
                 "counts": {state: sum(row["state"] == state for row in rows) for state in ("coded", "blank", "non_response", "failed")},
                 "model_revision": "Requested model ID recorded; exact provider revision unavailable.",

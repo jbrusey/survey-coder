@@ -240,6 +240,31 @@ class Store:
             db.execute("UPDATE runs SET status = 'queued' WHERE id = ?", (run_id,))
         return True
 
+    def retry_failed(self, owner: str, run_id: str) -> bool:
+        """Atomically queue only unsuccessful rows and fence the previous worker."""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            job = db.execute("""SELECT coding_jobs.*, runs.status FROM coding_jobs
+                JOIN runs ON runs.id = coding_jobs.run_id
+                WHERE run_id = ? AND owner_id = ?""", (run_id, owner)).fetchone()
+            if job is None or job["status"] not in ("failed", "completed_with_errors") or not job["spec"]:
+                return False
+            remaining = db.execute("""SELECT COUNT(*) FROM coding_rows
+                WHERE run_id = ? AND state IN ('failed', 'pending')""", (run_id,)).fetchone()[0]
+            if not remaining:
+                return False
+            spec = json.loads(job["spec"])
+            spec["retry_count"] = spec.get("retry_count", 0) + 1
+            counts = json.loads(job["counts"])
+            counts.update(failed=0, remaining=remaining)
+            db.execute("""UPDATE coding_rows SET state = 'pending', labels = NULL, error = NULL
+                WHERE run_id = ? AND state = 'failed'""", (run_id,))
+            db.execute("""UPDATE coding_jobs SET spec = ?, counts = ?, error = NULL,
+                lease_owner = NULL, lease_until = NULL, result_id = NULL, manifest_id = NULL
+                WHERE run_id = ?""", (json.dumps(spec), json.dumps(counts), run_id))
+            db.execute("UPDATE runs SET status = 'queued' WHERE id = ?", (run_id,))
+        return True
+
     def claim(self, worker: str):
         now = time.time()
         with self.connect() as db:
